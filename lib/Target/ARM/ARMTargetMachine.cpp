@@ -34,6 +34,7 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
+#include "ARMSilhouetteSTR2STRT.h"
 using namespace llvm;
 
 static cl::opt<bool>
@@ -51,6 +52,15 @@ static cl::opt<bool>
 EnableARMLoadStoreOpt("arm-load-store-opt", cl::Hidden,
                       cl::desc("Enable ARM load/store optimization pass"),
                       cl::init(true));
+
+// Silhouette commandline options
+bool SilhouetteStr2Strt;
+static cl::opt<bool, true>
+EnableSilhouetteStr2Strt("enable-arm-silhouette-str2strt",
+                         cl::desc("Enable Silhouette store to unprivileged store pass"),
+                         cl::location(SilhouetteStr2Strt),
+                         cl::init(false), cl::Hidden);
+
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -541,4 +551,9 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMOptimizeBarriersPass());
 
   addPass(createARMConstantIslandPass());
+
+  // Add Silhouette passes.
+  if (EnableSilhouetteStr2Strt) {
+    addPass(createARMSilhouetteSTR2STRT());
+  }
 }
