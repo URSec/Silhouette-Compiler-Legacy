@@ -15,6 +15,7 @@
 #include "ARMSubtarget.h"
 #include "ARMTargetObjectFile.h"
 #include "ARMTargetTransformInfo.h"
+#include "ARMSilhouetteSTR2STRT.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "TargetInfo/ARMTargetInfo.h"
 #include "llvm/ADT/Optional.h"
@@ -68,6 +69,15 @@ static cl::opt<bool>
 EnableARMLoadStoreOpt("arm-load-store-opt", cl::Hidden,
                       cl::desc("Enable ARM load/store optimization pass"),
                       cl::init(true));
+
+// Silhouette commandline options
+bool SilhouetteStr2Strt;
+static cl::opt<bool, true>
+EnableSilhouetteStr2Strt("enable-arm-silhouette-str2strt",
+                         cl::desc("Enable Silhouette store to unprivileged store pass"),
+                         cl::location(SilhouetteStr2Strt),
+                         cl::init(false), cl::Hidden);
+
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -531,4 +541,9 @@ void ARMPassConfig::addPreEmitPass() {
 
   addPass(createARMConstantIslandPass());
   addPass(createARMLowOverheadLoopsPass());
+
+  // Add Silhouette passes.
+  if (EnableSilhouetteStr2Strt) {
+    addPass(createARMSilhouetteSTR2STRT());
+  }
 }
