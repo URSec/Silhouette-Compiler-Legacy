@@ -14,6 +14,12 @@
 //
 
 #include "ARMSilhouetteSTR2STRT.h"
+#include "ARM.h"
+#include "ARMTargetMachine.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -28,6 +34,33 @@ const char *ARMSilhouetteSTR2STRT::getPassName() const {
   return "ARM Silhouette store to store unprivileged convertion Pass";
 }
 
+
+//
+// Method: debugHelper()
+//
+// Description:
+//   This method helps to print all kinds of information for the purpose of 
+//   debugging. For example, if you want to know the opcode of some instruction,
+//   you can add 
+//     errs() << "some_instr's opcode = " << ARM::some_instr" << "\n"
+//   in this method.
+//   Putting all the printing or dumping in one method makes the code cleaner.
+//
+// Inputs:
+//   MF - A reference to the MachineFunction this pass is currently processing.
+//
+// Outputs:
+//   Debugging information.
+//
+// Return Value:
+//   None
+void debugHelper(MachineFunction &MF) {
+  errs() << "tSUBi3 = " << ARM::tSUBi3 << "\n";
+  errs() << "tSTRspi = " << ARM::tSTRspi << "\n";
+  errs() << "t2STR_PRE = " << ARM::t2STR_PRE << "\n";
+}
+
+
 //
 // Method: runOnMachineFunction()
 //
@@ -37,13 +70,13 @@ const char *ARMSilhouetteSTR2STRT::getPassName() const {
 //   This method deletes all the normal store instructions and insert store
 //   unprivileged instructions.
 //
-//   Inputs:
+// Inputs:
 //   MF - A reference to the MachineFunction to transform.
 //
-//   Outputs:
+// Outputs:
 //   MF - The transformed MachineFunction.
 //
-//   Return value:
+// Return value:
 //   true - The MachineFunction was transformed.
 //   false - The MachineFunction was not transformed.
 //
