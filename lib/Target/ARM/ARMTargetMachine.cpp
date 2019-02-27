@@ -15,6 +15,7 @@
 #include "ARMSubtarget.h"
 #include "ARMTargetObjectFile.h"
 #include "ARMTargetTransformInfo.h"
+#include "ARMSilhouetteMemOverhead.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "TargetInfo/ARMTargetInfo.h"
@@ -77,6 +78,13 @@ EnableSilhouetteStr2Strt("enable-arm-silhouette-str2strt",
                          cl::desc("Enable Silhouette store to unprivileged store pass"),
                          cl::location(SilhouetteStr2Strt),
                          cl::init(false), cl::Hidden);
+
+bool SilhouetteMemOverhead;
+static cl::opt<bool, true>
+EnableSilhouetteMemOverhead("enable-arm-silhouette-mem-overhead",
+                            cl::desc("Enable Silhouette memory overhead estimation pass"),
+                            cl::location(SilhouetteMemOverhead),
+                            cl::init(false), cl::Hidden);
 
 
 // FIXME: Unify control over GlobalMerge.
@@ -545,5 +553,9 @@ void ARMPassConfig::addPreEmitPass() {
   // Add Silhouette passes.
   if (EnableSilhouetteStr2Strt) {
     addPass(createARMSilhouetteSTR2STRT());
+  }
+
+  if (EnableSilhouetteMemOverhead) {
+    addPass(createARMSilhouetteMemOverhead());
   }
 }
