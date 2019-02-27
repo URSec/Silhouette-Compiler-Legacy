@@ -35,6 +35,7 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
 #include "ARMSilhouetteSTR2STRT.h"
+#include "ARMSilhouetteMemOverhead.h"
 using namespace llvm;
 
 static cl::opt<bool>
@@ -60,6 +61,13 @@ EnableSilhouetteStr2Strt("enable-arm-silhouette-str2strt",
                          cl::desc("Enable Silhouette store to unprivileged store pass"),
                          cl::location(SilhouetteStr2Strt),
                          cl::init(false), cl::Hidden);
+
+bool SilhouetteMemOverhead;
+static cl::opt<bool, true>
+EnableSilhouetteMemOverhead("enable-arm-silhouette-mem-overhead",
+                            cl::desc("Enable Silhouette memory overhead estimation pass"),
+                            cl::location(SilhouetteMemOverhead),
+                            cl::init(false), cl::Hidden);
 
 
 // FIXME: Unify control over GlobalMerge.
@@ -555,5 +563,9 @@ void ARMPassConfig::addPreEmitPass() {
   // Add Silhouette passes.
   if (EnableSilhouetteStr2Strt) {
     addPass(createARMSilhouetteSTR2STRT());
+  }
+
+  if (EnableSilhouetteMemOverhead) {
+    addPass(createARMSilhouetteMemOverhead());
   }
 }
