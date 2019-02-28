@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 //
 
-#ifndef ARMSILHOUETTESTR2STRT
-#define ARMSILHOUETTESTR2STRT
+#ifndef ARM_SILHOUETTE_STR2STRT
+#define ARM_SILHOUETTE_STR2STRT
 
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
@@ -24,7 +24,9 @@ namespace llvm {
     static char ID;
 
     ARMSilhouetteSTR2STRT();
+
     virtual StringRef getPassName() const override;
+
     virtual bool runOnMachineFunction(MachineFunction &MF) override;
   };
 
