@@ -27,7 +27,7 @@ namespace llvm {
 
     ARMSilhouetteMemOverhead();
 
-    virtual const char *getPassName() const override;
+    virtual StringRef getPassName() const override;
 
     virtual bool runOnMachineFunction(MachineFunction &MF) override;
   };

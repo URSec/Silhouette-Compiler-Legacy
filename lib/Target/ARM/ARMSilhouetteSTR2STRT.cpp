@@ -30,7 +30,7 @@ ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
   return;
 }
 
-const char *ARMSilhouetteSTR2STRT::getPassName() const {
+StringRef ARMSilhouetteSTR2STRT::getPassName() const {
   return "ARM Silhouette store to store unprivileged convertion Pass";
 }
 
