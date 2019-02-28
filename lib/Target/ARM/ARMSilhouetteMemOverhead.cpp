@@ -30,7 +30,7 @@ ARMSilhouetteMemOverhead::ARMSilhouetteMemOverhead() : MachineFunctionPass(ID) {
   return;
 }
 
-const char *ARMSilhouetteMemOverhead::getPassName() const {
+StringRef ARMSilhouetteMemOverhead::getPassName() const {
   return "ARM Silhouette Memory Overhead Estimation Pass";
 }
 
