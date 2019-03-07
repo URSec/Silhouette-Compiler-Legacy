@@ -24,6 +24,15 @@
 
 using namespace llvm;
 
+// A white list of functions on which this pass will run. 
+// This is a helper for development. 
+// Will take it out after the development is done.
+const static std::set<std::string> funcWhiteList = {
+  "main",
+  "vMainUARTPrintString",
+  "vListInsertEnd"
+};
+
 char ARMSilhouetteSTR2STRT::ID = 0;
 
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
@@ -98,6 +107,26 @@ void debugHelper(MachineFunction &MF) {
   errs() << "t2STR_PRE = " << ARM::t2STR_PRE << "\n";
 }
 
+// 
+// Method: printOperands()
+//
+// Description:
+//   This method dumps a MachineInstr and all its explicit operands.
+//
+// Inputs:
+//   MI - A referecne to the MachineInstr to be examined.
+//
+// Outputs:
+//   The dump of the MachineInstr and its operands.
+static void printOperands(MachineInstr &MI) {
+  MI.dump();
+
+  unsigned numOperands = MI.getNumExplicitOperands();
+  errs() << "Number of operands: " << numOperands << "\n";
+  for (unsigned i = 0; i < numOperands; i++) {
+    MI.getOperand(i).dump();
+  }
+}
 
 //
 // Method: runOnMachineFunction()
@@ -119,6 +148,12 @@ void debugHelper(MachineFunction &MF) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
+  StringRef funcName = MF.getName();
+  if (funcWhiteList.find(funcName) == funcWhiteList.end()) return false;
+
+  errs() << "hello from function: " << funcName << "\n";
+
+
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
   DebugLoc DL;
 
@@ -132,24 +167,30 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       int64_t imm = 0;
 
       switch (opcode) {
-        case ARM::tSTRspi:
+        case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
+        case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
         case ARM::t2STR_PRE:
+#if 0
           // It's a STR instruction.
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
-          // The imm of a STR(immediate) = ZeroExtend(imm: "00", 32); but the imm 
-          // of the STRT instruction is not ZeroExtended. 
+          // The imm of a STR(immediate) = ZeroExtend(imm: "00", 32); but the 
+          // imm of the STRT instruction is not ZeroExtended. 
           imm <<= 2; 
           buildUnprivStore(MBB, &MI, sourceReg, baseReg, imm, ARM::t2STRT, DL, TII);
-
+          
           originalStores.push_back(&MI);
+#endif
+          printOperands(MI);
           break;
         
         default:
           if (MI.mayStore()) {
+#if 0
               errs() << "Silhouette: other stores; dump: \n";
               MI.dump();
+#endif
           }
           break;
       }
