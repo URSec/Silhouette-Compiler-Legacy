@@ -24,15 +24,6 @@
 
 using namespace llvm;
 
-// A white list of functions on which this pass will run. 
-// This is a helper for development. 
-// Will take it out after the development is done.
-const static std::set<std::string> funcWhiteList = {
-  "main",
-  "vMainUARTPrintString",
-  "vListInsertEnd"
-};
-
 char ARMSilhouetteSTR2STRT::ID = 0;
 
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
@@ -148,10 +139,11 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
+#if 0
   StringRef funcName = MF.getName();
-  if (funcWhiteList.find(funcName) == funcWhiteList.end()) return false;
-
-  errs() << "hello from function: " << funcName << "\n";
+  if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
+  errs() << "Silhouette: hello from function: " << funcName << "\n";
+#endif
 
 
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
@@ -167,10 +159,11 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       int64_t imm = 0;
 
       switch (opcode) {
+        // stores immediate
         case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
-        case ARM::t2STR_PRE:
-#if 0
+        /* case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>] */
+#if 1
           // It's a STR instruction.
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
@@ -182,13 +175,25 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           
           originalStores.push_back(&MI);
 #endif
-          printOperands(MI);
+          /* printOperands(MI); */
+          MI.dump();
+          break;
+
+
+        // indexed stores
+        case ARM::t2STR_PRE: // pre-index store
+        case ARM::t2STR_POST: // post-index store
+          /* printOperands(MI); */
+          break;
+        
+        // STR(register); A7.7.159
+        case ARM::tSTRr:   
           break;
         
         default:
           if (MI.mayStore()) {
-#if 0
-              errs() << "Silhouette: other stores; dump: \n";
+#if 1
+              errs() << "Silhouette: other stores; dump: ";
               MI.dump();
 #endif
           }
