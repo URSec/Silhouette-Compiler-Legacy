@@ -139,9 +139,15 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
-#if 0
+#if 1
   StringRef funcName = MF.getName();
+  // skip certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
+
+  // instrument certain functions
+  if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
+
+  // for debugging
   errs() << "Silhouette: hello from function: " << funcName << "\n";
 #endif
 
@@ -156,34 +162,36 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       unsigned opcode = MI.getOpcode();
       unsigned sourceReg = 0;
       unsigned baseReg = 0;
+      unsigned offsetReg = 0; // for STR(register) 
       int64_t imm = 0;
 
       switch (opcode) {
-        // stores immediate
+        // stores immediate; A7.7.158 STR(immediate)
         case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
-        /* case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>] */
+        case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
 #if 1
-          // It's a STR instruction.
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
-          // The imm of a STR(immediate) = ZeroExtend(imm: "00", 32); but the 
-          // imm of the STRT instruction is not ZeroExtended. 
-          imm <<= 2; 
+          if (opcode == ARM::tSTRi || opcode == ARM::tSTRspi) {
+            // The imm of a these two stores = ZeroExtend(imm: "00", 32); 
+            // but the  imm of the STRT instruction is not ZeroExtended. 
+            imm <<= 2; 
+          }
+
           buildUnprivStore(MBB, &MI, sourceReg, baseReg, imm, ARM::t2STRT, DL, TII);
-          
           originalStores.push_back(&MI);
 #endif
-          /* printOperands(MI); */
+#if 0
           MI.dump();
+          printOperands(MI);
+#endif
           break;
-
 
         // indexed stores
         case ARM::t2STR_PRE: // pre-index store
         case ARM::t2STR_POST: // post-index store
-          /* printOperands(MI); */
           break;
         
         // STR(register); A7.7.159
@@ -193,8 +201,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         default:
           if (MI.mayStore()) {
 #if 1
-              errs() << "Silhouette: other stores; dump: ";
-              MI.dump();
+            errs() << "Silhouette: other stores; dump: ";
+            MI.dump();
 #endif
           }
           break;
