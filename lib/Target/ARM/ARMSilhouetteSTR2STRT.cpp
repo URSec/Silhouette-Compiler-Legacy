@@ -36,12 +36,13 @@ StringRef ARMSilhouetteSTR2STRT::getPassName() const {
 
 
 //
-// Method: buildUnprivStore()
+// Method: convertSTRimm()
 //
 // Description:
-//   This method builds an unprivileged store for a normal store. 
+//   This method builds an unprivileged store for a normal STR(immediate).
 //   Currently it only handles STR -> STRT. We need support all the other stores
 //   by expanding this method or adding new method(s).
+//   Note that the imm field of a STRT instruction ranges 0 - 255.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
@@ -59,17 +60,84 @@ StringRef ARMSilhouetteSTR2STRT::getPassName() const {
 // Return:
 //   None.
 //
-void buildUnprivStore(MachineBasicBlock &MBB,
+void convertSTRimm(MachineBasicBlock &MBB,
                      MachineInstr *MI,
                      unsigned sourceReg, unsigned baseReg, int64_t imm,
                      unsigned newInstrOpcode,
                      DebugLoc &DL,
                      const TargetInstrInfo *TII) {
+  if (imm < 0) errs() << "IMM is negative.\n";
   // insert a new unprivileged store
   BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
     .addReg(sourceReg)
     .addReg(baseReg)
     .addImm(imm);
+
+}
+
+//
+// Method: convertSTRimmIndexed()
+//
+// Description:
+//   This method builds an unprivileged store for a normal STR(immediate).
+//   Currently it only handles STR -> STRT. We need support all the other stores
+//   by expanding this method or adding new method(s).
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   sourceReg - The register whose contents will be stored to some memory address.
+//   baseReg - The register used as the base register to compute the memory address.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   newInstrOpcode - The opcode of the unprivileged store.
+//   preIndex - Indicate the original instruction is pre-indexed or post-indexed.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   A new unprivileged store.
+//
+// Return:
+//   None.
+//
+void convertSTRimmIndexed(MachineBasicBlock &MBB,
+                          MachineInstr *MI,
+                          unsigned sourceReg, unsigned baseReg, int64_t imm,
+                          bool preIndex,
+                          unsigned newInstrOpcode,
+                          DebugLoc &DL,
+                          const TargetInstrInfo *TII) {
+  // TO-DO: handle negative imm
+  
+  if (preIndex == true) {
+    // This is a pre-indexed store.
+     
+    // insert a new unprivileged store
+    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+      .addReg(sourceReg)
+      .addReg(baseReg)
+      .addImm(imm);
+  } else {
+    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+      // This is a post-indexed store.
+      .addReg(sourceReg)
+      .addReg(baseReg)
+      .addImm(0);
+  }
+
+  // updatr the imm to the base register
+  if (imm >= 0) {
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
+      .addReg(baseReg)
+      .addReg(baseReg)
+      .addImm(-imm);
+  } else {
+    BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+      .addReg(baseReg)
+      .addReg(baseReg)
+      .addImm(imm);
+  }
+
 }
 
 
@@ -139,7 +207,7 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
-#if 1
+#if 0
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
@@ -164,13 +232,14 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       unsigned baseReg = 0;
       unsigned offsetReg = 0; // for STR(register) 
       int64_t imm = 0;
-
+      
+      
       switch (opcode) {
         // stores immediate; A7.7.158 STR(immediate)
+#if 0
         case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
         case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
-#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -180,18 +249,20 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
             imm <<= 2; 
           }
 
-          buildUnprivStore(MBB, &MI, sourceReg, baseReg, imm, ARM::t2STRT, DL, TII);
+          convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, ARM::t2STRT, DL, TII);
           originalStores.push_back(&MI);
-#endif
-#if 0
-          MI.dump();
-          printOperands(MI);
 #endif
           break;
 
         // indexed stores
         case ARM::t2STR_PRE: // pre-index store
         case ARM::t2STR_POST: // post-index store
+          sourceReg = MI.getOperand(0).getReg();
+          baseReg = MI.getOperand(1).getReg(); // the reg to be updated
+          imm = MI.getOperand(3).getImm();
+          convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::t2STR_PRE,
+              ARM::t2STRT, DL, TII);
+          originalStores.push_back(&MI);
           break;
         
         // STR(register); A7.7.159
@@ -200,7 +271,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         
         default:
           if (MI.mayStore()) {
-#if 1
+#if 0
             errs() << "Silhouette: other stores; dump: ";
             MI.dump();
 #endif
