@@ -66,14 +66,35 @@ void convertSTRimm(MachineBasicBlock &MBB,
                      unsigned newInstrOpcode,
                      DebugLoc &DL,
                      const TargetInstrInfo *TII) {
-  if (imm < 0) errs() << "IMM is negative.\n";
-  // insert a new unprivileged store
-  BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-    .addReg(sourceReg)
-    .addReg(baseReg)
-    .addImm(imm);
 
+  // Unprivileged stores only support positive imm. If imm is a negative, then 
+  // we need to add this imm to the base register, give 0 to the imm field of 
+  // the new str, and restore the base registr.
+  if (imm < 0) {
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
+      .addReg(baseReg)
+      .addReg(baseReg)
+      .addImm(-imm);
+    
+    // insert a new unprivileged store
+    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+      .addReg(sourceReg)
+      .addReg(baseReg)
+      .addImm(0);
+    
+    // restore the base register
+    BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+      .addReg(baseReg)
+      .addReg(baseReg)
+      .addImm(-imm);
+  } else {
+    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+      .addReg(sourceReg)
+      .addReg(baseReg)
+      .addImm(imm);
+  }
 }
+
 
 //
 // Method: convertSTRimmIndexed()
@@ -207,11 +228,11 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
-#if 0
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
 
+#if 0
   // instrument certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
 
