@@ -35,6 +35,10 @@ StringRef ARMSilhouetteSTR2STRT::getPassName() const {
 }
 
 
+// function declration
+static void printOperands(MachineInstr &MI);
+
+
 //
 // Method: convertSTRimm()
 //
@@ -71,6 +75,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
   // we need to add this imm to the base register, give 0 to the imm field of 
   // the new str, and restore the base registr.
   if (imm < 0) {
+    printOperands(*MI);
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -80,7 +85,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
       .addReg(sourceReg)
       .addReg(baseReg)
-      .addImm(0);
+      .addImm(imm);
     
     // restore the base register
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
@@ -103,6 +108,22 @@ void convertSTRimm(MachineBasicBlock &MBB,
 //   This method builds an unprivileged store for a normal STR(immediate).
 //   Currently it only handles STR -> STRT. We need support all the other stores
 //   by expanding this method or adding new method(s).
+//
+//   If this instruction uses the stack pointer (SP) as the base register,
+//   then we need use a special add or sub: ADD (SP plus immediate) A7.7.5,
+//   or SUB (SP minute immediate). Using a normal add/sub that adds/subs an imm
+//   to/from a register would lead to wrong instructions. For example, 
+//
+//      BuildMI(......, ARM::tADDi8, ARM::SP)
+//          .addReg(ARM::SP)
+//          .addReg(ARM::SP)
+//          .addImm(imm);
+//
+//   would generate the following instruction in the final executable:
+//      
+//      add r5, imm
+//
+//   We need use ARM::tADDspi to construct the special add.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
@@ -128,37 +149,86 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
                           unsigned newInstrOpcode,
                           DebugLoc &DL,
                           const TargetInstrInfo *TII) {
-  // TO-DO: handle negative imm
-  
   if (preIndex == true) {
     // This is a pre-indexed store.
-     
-    // insert a new unprivileged store
+    // First, update the base register.
+    if (imm < 0) {
+      if (baseReg == ARM::SP) {
+        // If the baseReg is SP, then we need to use the special sub mentioned
+        // in the comment of this function.
+
+        // For SUB (SP minus imm), imm = ZeroExtend(imm7:'00', 32)
+        assert((-imm) % 4 == 0 && "IMM is not a multiple of 4");
+
+        imm = (-imm) >> 2;
+        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
+          .addReg(baseReg)
+          .addImm(imm);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8))
+          .addReg(baseReg)
+          .addReg(baseReg)
+          .addImm(-imm);
+      }
+    } else {
+      // imm >= 0.
+      if (baseReg == ARM::SP) {
+        // For ADD (SP plus imm), imm = ZeroExtend(imm7:'00', 32)
+        assert(imm % 4 == 0 && "IMM is not a multiple of 4");
+        imm >>= 2;
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg)
+          .addImm(imm);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+          .addReg(baseReg)
+          .addReg(baseReg)
+          .addImm(imm);
+      }
+    }
+
+    // Second, build a new store.
     BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-      .addReg(sourceReg)
-      .addReg(baseReg)
-      .addImm(imm);
-  } else {
-    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-      // This is a post-indexed store.
       .addReg(sourceReg)
       .addReg(baseReg)
       .addImm(0);
-  }
-
-  // updatr the imm to the base register
-  if (imm >= 0) {
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
-      .addReg(baseReg)
-      .addReg(baseReg)
-      .addImm(-imm);
   } else {
-    BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+    // This is a post-indexed store.
+    // First, build a new store.
+    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+      .addReg(sourceReg)
       .addReg(baseReg)
-      .addReg(baseReg)
-      .addImm(imm);
-  }
+      .addImm(0);
 
+    // Second, update the imm to the base register
+    if (imm < 0) {
+      if (baseReg == ARM::SP) {
+        assert((-imm) % 4 == 0 && "IMM is not a multiple of 4");
+        
+        imm = (-imm) >> 2;
+        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
+          .addReg(baseReg)
+          .addImm(imm);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
+          .addReg(baseReg)
+          .addReg(baseReg)
+          .addImm(-imm);
+      }
+    } else {
+      if (baseReg == ARM::SP) {
+        assert(imm % 4 == 0 && "IMM is not a multiple of 4");
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg)
+          .addImm(imm);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+          .addReg(baseReg)
+          .addReg(baseReg)
+          .addImm(imm);
+      }
+    }
+  }
 }
 
 
@@ -199,6 +269,7 @@ void debugHelper(MachineFunction &MF) {
 // Outputs:
 //   The dump of the MachineInstr and its operands.
 static void printOperands(MachineInstr &MI) {
+  errs() << "(function: " << MI.getParent()->getParent()->getName() << ")\n";
   MI.dump();
 
   unsigned numOperands = MI.getNumExplicitOperands();
@@ -230,15 +301,15 @@ static void printOperands(MachineInstr &MI) {
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   StringRef funcName = MF.getName();
   // skip certain functions
-  if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
-
-#if 0
-  // instrument certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
+
+#if 1
+  // instrument certain functions
+  if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
+#endif
 
   // for debugging
   errs() << "Silhouette: hello from function: " << funcName << "\n";
-#endif
 
 
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
@@ -256,8 +327,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       
       
       switch (opcode) {
-        // stores immediate; A7.7.158 STR(immediate)
 #if 0
+        // stores immediate; A7.7.158 STR(immediate)
         case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
         case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
@@ -272,19 +343,23 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, ARM::t2STRT, DL, TII);
           originalStores.push_back(&MI);
-#endif
           break;
+#endif
 
+#if 1
         // indexed stores
         case ARM::t2STR_PRE: // pre-index store
         case ARM::t2STR_POST: // post-index store
-          sourceReg = MI.getOperand(0).getReg();
-          baseReg = MI.getOperand(1).getReg(); // the reg to be updated
+          sourceReg = MI.getOperand(1).getReg();
+          baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
           convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::t2STR_PRE,
               ARM::t2STRT, DL, TII);
           originalStores.push_back(&MI);
+
+          printOperands(MI);
           break;
+#endif
         
         // STR(register); A7.7.159
         case ARM::tSTRr:   
