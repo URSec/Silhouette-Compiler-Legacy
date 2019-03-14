@@ -40,11 +40,47 @@ static void printOperands(MachineInstr &MI);
 
 
 //
+// Method: buildSTRT
+//
+// Description:
+//   This method builds a unprivileged store instructions. It serves as a
+//   space-saver - this pass builds unprivileged stores a lot.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   sourceReg - The register whose contents will be stored to some memory address.
+//   baseReg - The register used as the base register to compute the memory address.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   newInstrOpcode - The opcode of the unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   A new unprivileged store.
+//
+// Return:
+//   None.
+
+static void buildSTRT(MachineBasicBlock &MBB,
+                      MachineInstr *MI,
+                      unsigned sourceReg, unsigned baseReg, uint8_t imm,
+                      unsigned newInstrOpcode,
+                      DebugLoc &DL,
+                      const TargetInstrInfo *TII) {
+  BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+    .addReg(sourceReg)
+    .addReg(baseReg)
+    .addImm(imm);
+}
+
+
+//
 // Method: convertSTRimm()
 //
 // Description:
-//   This method builds an unprivileged store for a normal STR(immediate).
-//   Currently it only handles STR -> STRT. We need support all the other stores
+//   This method builds an unprivileged store for a STR(immediate). Currently it 
+//   only handles STR -> STRT. We need support all the other stores
 //   by expanding this method or adding new method(s).
 //   Note that the imm field of a STRT instruction ranges 0 - 255.
 //
@@ -70,9 +106,11 @@ void convertSTRimm(MachineBasicBlock &MBB,
                      unsigned newInstrOpcode,
                      DebugLoc &DL,
                      const TargetInstrInfo *TII) {
-
+  
+  // TO-DO: baseReg could be SP, which should be handled individually.
+  
   // Unprivileged stores only support positive imm. If imm is a negative, then 
-  // we need to add this imm to the base register, give 0 to the imm field of 
+  // we need to sub this imm to the base register, give 0 to the imm field of 
   // the new str, and restore the base registr.
   if (imm < 0) {
     printOperands(*MI);
@@ -82,21 +120,15 @@ void convertSTRimm(MachineBasicBlock &MBB,
       .addImm(-imm);
     
     // insert a new unprivileged store
-    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-      .addReg(sourceReg)
-      .addReg(baseReg)
-      .addImm(imm);
-    
+    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+
     // restore the base register
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
       .addImm(-imm);
   } else {
-    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-      .addReg(sourceReg)
-      .addReg(baseReg)
-      .addImm(imm);
+    buildSTRT(MBB, MI, sourceReg, baseReg, imm, newInstrOpcode, DL, TII);
   }
 }
 
@@ -188,17 +220,11 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
     }
 
     // Second, build a new store.
-    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-      .addReg(sourceReg)
-      .addReg(baseReg)
-      .addImm(0);
+    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
   } else {
     // This is a post-indexed store.
     // First, build a new store.
-    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-      .addReg(sourceReg)
-      .addReg(baseReg)
-      .addImm(0);
+    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
 
     // Second, update the imm to the base register
     if (imm < 0) {
@@ -303,7 +329,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
 
-#if 1
+#if 0
   // instrument certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
 #endif
@@ -356,8 +382,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::t2STR_PRE,
               ARM::t2STRT, DL, TII);
           originalStores.push_back(&MI);
-
-          printOperands(MI);
           break;
 #endif
         
