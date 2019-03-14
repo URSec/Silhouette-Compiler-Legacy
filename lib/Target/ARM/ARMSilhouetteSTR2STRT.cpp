@@ -259,6 +259,53 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
 
 
 //
+// Function: convertSTRReg()
+//
+// Description:
+//   This function builds an unprivileged store for a STR(Register). 
+//   Since unprivileged stores don't support (base register + offset register)
+//   to compute the target address, we need to add the offset register to the
+//   base register first, build a store, and then restore the base register.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   sourceReg - The register whose contents will be stored to some memory address.
+//   baseReg - The register used as the base register to compute the memory address.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   newInstrOpcode - The opcode of the unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   A new unprivileged store.
+//
+// Return:
+//   None.
+//
+void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
+                   unsigned sourceReg, unsigned baseReg, unsigned offsetReg,
+                   unsigned newInstrOpcode,
+                   DebugLoc &DL,
+                   const TargetInstrInfo *TII) {
+  // Add up the base and offset registers.
+  BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
+    .addReg(baseReg)
+    .addReg(baseReg)
+    .addReg(offsetReg);
+
+  // Build an unprivileged store.
+  buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+
+  // Restore the base register.
+  BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
+    .addReg(baseReg)
+    .addReg(baseReg)
+    .addReg(offsetReg);
+}
+
+
+//
 // Method: debugHelper()
 //
 // Description:
@@ -304,6 +351,7 @@ static void printOperands(MachineInstr &MI) {
     MI.getOperand(i).dump();
   }
 }
+
 
 //
 // Method: runOnMachineFunction()
@@ -372,7 +420,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           break;
 #endif
 
-#if 1
+#if 0
         // indexed stores
         case ARM::t2STR_PRE: // pre-index store
         case ARM::t2STR_POST: // post-index store
@@ -385,9 +433,18 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           break;
 #endif
         
+#if 1
         // STR(register); A7.7.159
-        case ARM::tSTRr:   
+        case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
+        // TO-DO: Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+          printOperands(MI);
+          sourceReg = MI.getOperand(0).getReg();
+          baseReg = MI.getOperand(1).getReg();
+          offsetReg = MI.getOperand(2).getReg();
+          convertSTRReg(MBB, &MI, sourceReg, baseReg, offsetReg, ARM::t2STRT, DL, TII);
+          originalStores.push_back(&MI);
           break;
+#endif
         
         default:
           if (MI.mayStore()) {
