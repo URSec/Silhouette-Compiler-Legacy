@@ -45,6 +45,7 @@ StringRef ARMSilhouetteMemOverhead::getPassName() const {
   return "ARM Silhouette Memory Overhead Estimation Pass";
 }
 
+
 //
 // Method: runOnMachineFunction()
 //
@@ -74,22 +75,48 @@ bool ARMSilhouetteMemOverhead::runOnMachineFunction(MachineFunction &MF) {
 
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
+      unsigned opcode = MI.getOpcode();
+      int64_t imm = 0;
+
       int instrSize = ABII->getInstSizeInBytes(MI);
       totalInstrSize += instrSize;
       CODE_SIZE += instrSize;
 
       if (MI.mayStore() || MI.mayLoad()) {
-        memOpSize += 2;
-        MEM_OP_SIZE += 2;
-        if (instrSize == 2) {
-          // All the unprivileged loads and store instructions are 4 bytes long
-          // in the thumb ISA.
-          memIncreased += 2;         
-          MEM_OVERHEAD += 2;
+        MEM_OP_SIZE += instrSize;
+        switch(opcode) {
+          // stores immediate; A7.7.158 STR(immediate)
+          case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
+          case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
+          case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
+            memOpSize += 2;
+            imm = MI.getOperand(2).getImm();
+            if (imm < 0) {
+              // Add an extra add and a sub
+              memIncreased += 6;
+            } else {
+              memIncreased += 2;
+            }
+            break;
+          
+          // indexed stores
+          case ARM::t2STR_PRE: // pre-index store
+          case ARM::t2STR_POST: // post-index store
+            // We need an extra add or sub to update the base register.
+            memIncreased += 2;
+            break;
+
+          // STR(register); A7.7.159
+          case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
+            // Update the base register first, and then restore.
+            memIncreased += 4;
+            break;
         }
       }
     }
   }
+
+  MEM_OVERHEAD += memIncreased;
 
   errs() << "Function " << MF.getName() << ":\n";
   errs() << "Total code size  = " << totalInstrSize << " bytes.\n";
