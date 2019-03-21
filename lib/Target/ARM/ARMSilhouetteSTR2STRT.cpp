@@ -58,16 +58,35 @@ static void printOperands(MachineInstr &MI);
 //
 static unsigned getNewOpcode(unsigned opcode) {
   switch (opcode) {
-    case ARM::tSTRi:
-    case ARM::tSTRspi:
-    case ARM::t2STRi12:
-    case ARM::t2STR_PRE:
-    case ARM::t2STR_POST:
-    case ARM::tSTRr:
-    case ARM::t2STRs:  
+    // store word
+    case ARM::tSTRi:       // A7.7.158 Encoding T1
+    case ARM::tSTRspi:     // A7.7.158 Encoding T2
+    case ARM::t2STRi12:    // A7.7.158 Encoding T3
+    case ARM::t2STRi8:     // A7.7.158 Encoding T4
+    case ARM::t2STR_PRE:   // A7.7.158 Encoding T4; pre-index
+    case ARM::t2STR_POST:  // A7.7.158 Encoding T4; post-index
+    case ARM::tSTRr:       // A7.7.159 Encoding T1
+    case ARM::t2STRs:      // A7.7.158 Encoding T2
       return ARM::t2STRT;
 
-    case ARM::tSTRBi:
+    // store half word
+    case ARM::tSTRHi:      // A7.7.167 Encoding T1
+    case ARM::t2STRHi12:   // A7.7.167 Encoding T2
+    case ARM::t2STRHi8:    // A7.7.167 Encoding T3; not write back
+    case ARM::t2STRH_PRE:  // A7.7.160 Encoding T3; pre-index
+    case ARM::t2STRH_POST: // A7.7.160 Encoding T3; post-index
+    case ARM::tSTRHr:      // A7.7.168 Encoding T1
+    case ARM::t2STRHs:     // A7.7.168 Encoding T2
+      return ARM::t2STRHT;
+
+    // store byte
+    case ARM::tSTRBi:      // A7.7.160 Encoding T1
+    case ARM::t2STRBi12:   // A7.7.160 Encoding T2
+    case ARM::t2STRBi8:    // A7.7.160 Encoding T3; not write back
+    case ARM::t2STRB_PRE:  // A7.7.160 Encoding T3; pre-index
+    case ARM::t2STRB_POST: // A7.7.160 Encoding T3; post-index
+    case ARM::tSTRBr:      // A7.7.161 Encoding T1
+    case ARM::t2STRBs:     // A7.7.161 Encoding T2
       return ARM::t2STRBT;
   }
 
@@ -466,6 +485,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store immediate; A7.7.158 STR(immediate)
         case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
+        case ARM::t2STRi8:  // Encoding T3: STR<c> <Rt>,[SP,#<imm8>]
         case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
 #endif 
 
@@ -482,7 +502,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
             // but the  imm of the STRT instruction is not ZeroExtended. 
             imm <<= 2; 
           }
-
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
@@ -491,12 +510,12 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // indexed stores
         case ARM::t2STR_PRE: // pre-index store
         case ARM::t2STR_POST: // post-index store
-#if 0
+#if 1
           sourceReg = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
-          convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::t2STR_PRE,
-              ARM::t2STRT, DL, TII);
+          convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, 
+              opcode == ARM::t2STR_PRE, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
           break;
@@ -514,9 +533,14 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
 
+        // PUSH is a special store
+        case ARM::tPUSH:
+          // TO-DO
+          break;
+
         default:
           if (MI.mayStore()) {
-#if 0
+#if 1
             errs() << "Silhouette: other stores; dump: ";
             printOperands(MI);
 #endif
