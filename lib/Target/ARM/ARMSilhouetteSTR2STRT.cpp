@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 //
 
-#include "ARMSilhouetteSTR2STRT.h"
 #include "ARM.h"
 #include "ARMTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -21,6 +20,8 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
+#include "ARMSilhouetteSTR2STRT.h"
+#include "ARMSilhouetteConvertFuncList.h"
 
 using namespace llvm;
 
@@ -169,7 +170,6 @@ void convertSTRimm(MachineBasicBlock &MBB,
   // we need to sub this imm to the base register, give 0 to the imm field of 
   // the new str, and restore the base registr.
   if (imm < 0) {
-    printOperands(*MI);
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -458,7 +458,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
   
-#if 1
+#if 0
   // instrument certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
 #endif
@@ -492,8 +492,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #if 1
         // store byte immediate; A7.7.160 STRB(immediate)
         case ARM::tSTRBi:   // 
-          if (newOpcode == ARM::t2STRBT)
-            printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -524,7 +522,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
         case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
 #if 1
-          printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           offsetReg = MI.getOperand(2).getReg();
