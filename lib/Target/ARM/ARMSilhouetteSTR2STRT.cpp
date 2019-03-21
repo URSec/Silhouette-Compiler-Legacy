@@ -39,6 +39,43 @@ StringRef ARMSilhouetteSTR2STRT::getPassName() const {
 static void printOperands(MachineInstr &MI);
 
 
+// 
+// Function: getNewOpcode()
+//
+// Description:
+//   This function returns the opcode of an unprivileged load/store instruction
+//   corresponding to a normal load/store. According to table A4-17,  some 
+//   normal load/store have an unprivileged version while some don't. With some
+//   extra work, we map each kind of load/store to one unprivileged load/store 
+//   shown in this table.
+//
+// Inputs:
+//   opcode - The opcode of a normal load/store.
+//
+// Return value:
+//   newOpcode - The opcode of the corresponding unprivileged load/store.
+//   -1 - Implementation error: the input opcode is unknown.
+//
+static unsigned getNewOpcode(unsigned opcode) {
+  switch (opcode) {
+    case ARM::tSTRi:
+    case ARM::tSTRspi:
+    case ARM::t2STRi12:
+    case ARM::t2STR_PRE:
+    case ARM::t2STR_POST:
+    case ARM::tSTRr:
+    case ARM::t2STRs:  
+      return ARM::t2STRT;
+
+    case ARM::tSTRBi:
+      return ARM::t2STRBT;
+  }
+
+  // unknown opcode
+  return -1;
+}
+
+
 //
 // Method: buildSTRT
 //
@@ -288,20 +325,43 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
                    unsigned newInstrOpcode,
                    DebugLoc &DL,
                    const TargetInstrInfo *TII) {
-  // Add up the base and offset registers.
-  BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
-    .addReg(baseReg)
-    .addReg(baseReg)
-    .addReg(offsetReg);
+  if (MI->getNumExplicitOperands() == 5) {
+    // STR(register) Encoding T1; no lsl
+    // Add up the base and offset registers.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
+      .addReg(baseReg)
+      .addReg(baseReg)
+      .addReg(offsetReg);
 
-  // Build an unprivileged store.
-  buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    // Build an unprivileged store.
+    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
 
-  // Restore the base register.
-  BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
-    .addReg(baseReg)
-    .addReg(baseReg)
-    .addReg(offsetReg);
+    // Restore the base register.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
+      .addReg(baseReg)
+      .addReg(baseReg)
+      .addReg(offsetReg);
+  } else {
+
+    // STR(registr) Encoding T2; with lsl
+    uint8_t imm = MI->getOperand(3).getImm();
+    // Add up the base and offset registers (add with lsl).
+    BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDrs), baseReg)
+      .addReg(baseReg).addReg(offsetReg)
+      .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm))
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .addReg(0);  // opt:%noreg
+
+    // Build an unprivileged store.
+    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+
+    // Restore the base register.
+    BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBrs), baseReg)
+      .addReg(baseReg).addReg(offsetReg)
+      .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm)) 
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .addReg(0);  // opt:%noreg
+  }
 }
 
 
@@ -330,6 +390,7 @@ void debugHelper(MachineFunction &MF) {
   errs() << "t2STR_PRE = " << ARM::t2STR_PRE << "\n";
 }
 
+
 // 
 // Method: printOperands()
 //
@@ -345,9 +406,10 @@ static void printOperands(MachineInstr &MI) {
   errs() << "(function: " << MI.getParent()->getParent()->getName() << ")\n";
   MI.dump();
 
-  unsigned numOperands = MI.getNumExplicitOperands();
+  unsigned numOperands = MI.getNumOperands();
   errs() << "Number of operands: " << numOperands << "\n";
   for (unsigned i = 0; i < numOperands; i++) {
+    errs() << "Operand type = " << MI.getOperand(i).getType() << "; ";
     MI.getOperand(i).dump();
   }
 }
@@ -376,8 +438,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
-
-#if 0
+  
+#if 1
   // instrument certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
 #endif
@@ -385,27 +447,33 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   // for debugging
   errs() << "Silhouette: hello from function: " << funcName << "\n";
 
-
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
   DebugLoc DL;
 
   // iterate over all MachineInstr
   for (MachineBasicBlock &MBB : MF) {
-    std::vector<MachineInstr *> originalStores;  // we need delete the original stores
+    std::vector<MachineInstr *> originalStores; // Need delete the original stores.
     for (MachineInstr &MI : MBB) {
       unsigned opcode = MI.getOpcode();
       unsigned sourceReg = 0;
       unsigned baseReg = 0;
       unsigned offsetReg = 0; // for STR(register) 
       int64_t imm = 0;
-      
+      unsigned newOpcode = getNewOpcode(opcode);
       
       switch (opcode) {
-#if 0
-        // stores immediate; A7.7.158 STR(immediate)
+#if 1
+        // store immediate; A7.7.158 STR(immediate)
         case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
         case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
+#endif 
+
+#if 1
+        // store byte immediate; A7.7.160 STRB(immediate)
+        case ARM::tSTRBi:   // 
+          if (newOpcode == ARM::t2STRBT)
+            printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -415,42 +483,42 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
             imm <<= 2; 
           }
 
-          convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, ARM::t2STRT, DL, TII);
+          convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
-          break;
 #endif
+          break;
 
-#if 0
         // indexed stores
         case ARM::t2STR_PRE: // pre-index store
         case ARM::t2STR_POST: // post-index store
+#if 0
           sourceReg = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
           convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::t2STR_PRE,
               ARM::t2STRT, DL, TII);
           originalStores.push_back(&MI);
-          break;
 #endif
+          break;
         
-#if 1
-        // STR(register); A7.7.159
+        // STR(register); A7.7.159 
         case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
-        // TO-DO: Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+        case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+#if 1
           printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           offsetReg = MI.getOperand(2).getReg();
-          convertSTRReg(MBB, &MI, sourceReg, baseReg, offsetReg, ARM::t2STRT, DL, TII);
+          convertSTRReg(MBB, &MI, sourceReg, baseReg, offsetReg, newOpcode, DL, TII);
           originalStores.push_back(&MI);
-          break;
 #endif
-        
+          break;
+
         default:
           if (MI.mayStore()) {
 #if 0
             errs() << "Silhouette: other stores; dump: ";
-            MI.dump();
+            printOperands(MI);
 #endif
           }
           break;
