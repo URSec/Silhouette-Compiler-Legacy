@@ -482,23 +482,29 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       
       switch (opcode) {
 #if 1
-        // store immediate; A7.7.158 STR(immediate)
-        case ARM::tSTRi:    // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
-        case ARM::tSTRspi:  // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
-        case ARM::t2STRi8:  // Encoding T3: STR<c> <Rt>,[SP,#<imm8>]
-        case ARM::t2STRi12: // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
-#endif 
-
-#if 1
+        // store immediate; A7.7.158 STR (immediate)
+        case ARM::tSTRi:      // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
+        case ARM::tSTRspi:    // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
+        case ARM::t2STRi8:    // Encoding T3: STR<c> <Rt>,[SP,#<imm8>]
+        case ARM::t2STRi12:   // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
+        // store halfword immediate; A7.7.167 STRH (immiedate)
+        case ARM::tSTRHi:     // Encoding T1: STRH<c> <Rt>,[<Rn>{,#<imm5>}]
+        case ARM::t2STRHi12:  // Encoding T2: STRH<c>.W <Rt>,[<Rn>{,#<imm12>}]
+        case ARM::t2STRHi8:   // Encoding T3: STRH<c> <Rt>,[<Rn>,#-<imm8>]
         // store byte immediate; A7.7.160 STRB(immediate)
-        case ARM::tSTRBi:   // 
+        case ARM::tSTRBi:     // A7.7.160 Encoding T1
+        case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
+        case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
           if (opcode == ARM::tSTRi || opcode == ARM::tSTRspi) {
             // The imm of a these two stores = ZeroExtend(imm: "00", 32); 
-            // but the  imm of the STRT instruction is not ZeroExtended. 
+            // but the  imm of the unprivileged store is not ZeroExtended. 
             imm <<= 2; 
+          } else if (opcode == ARM::tSTRHi) {
+            // The imm of this store = ZeroExtend(imm5:'0',32).
+            imm <<= 1;
           }
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
@@ -506,10 +512,17 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           break;
 
         // indexed stores
-        case ARM::t2STR_PRE: // pre-index store
-        case ARM::t2STR_POST: // post-index store
+        // store word; A7.7.158 Encoding T4: STR<c> <Rt>,[<Rn>,#+/-<imm8>]!
+        case ARM::t2STR_PRE:  // pre-indexed store
+        case ARM::t2STR_POST: // post-indexed store
+        // store halfword; A7,7,167 Encoding T3: STRH<c> <Rt>,[<Rn>,#+/-<imm8>]!
+        case ARM::t2STRH_PRE:   // pre-indexed store
+        case ARM::t2STRH_POST:  // post-index store
+        // store byte; A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
+        case ARM::t2STRB_PRE:   // pre-indexed store
+        case ARM::t2STRB_POST:  // post-index store
 #if 1
-          sourceReg = MI.getOperand(1).getReg();
+          sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
           convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, 
@@ -531,13 +544,14 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           break;
 
         // PUSH is a special store
+        // ignore them for now.
         case ARM::tPUSH:
           // TO-DO
           break;
 
         default:
           if (MI.mayStore()) {
-#if 1
+#if 0
             errs() << "Silhouette: other stores; dump: ";
             printOperands(MI);
 #endif
