@@ -361,9 +361,9 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(baseReg)
       .addReg(offsetReg);
   } else {
-
     // STR(registr) Encoding T2; with lsl
     uint8_t imm = MI->getOperand(3).getImm();
+
     // Add up the base and offset registers (add with lsl).
     BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDrs), baseReg)
       .addReg(baseReg).addReg(offsetReg)
@@ -531,9 +531,16 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
         
-        // STR(register); A7.7.159 
+        // store register
+        // STR (register); A7.7.159 
         case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
-        case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+        case ARM::t2STRs: // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+        // STRH (register); A7.7.168
+        case ARM::tSTRHr: // Encoding T1: STRH<c> <Rt>,[<Rn>,<Rm>
+        case ARM::t2STRHs: // Encoding T2: STRH<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+        // STRB (register); A7.7.161
+        case ARM::tSTRBr:  // Encoding T1: STRB<c> <Rt>,[<Rn>,<Rm>]
+        case ARM::t2STRBs: // Encoding T2: STRB<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
 #if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
@@ -551,7 +558,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         default:
           if (MI.mayStore()) {
-#if 0
+#if 1
             errs() << "Silhouette: other stores; dump: ";
             printOperands(MI);
 #endif
