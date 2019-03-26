@@ -64,18 +64,24 @@ static unsigned getNewOpcode(unsigned opcode) {
     case ARM::tSTRspi:     // A7.7.158 Encoding T2
     case ARM::t2STRi12:    // A7.7.158 Encoding T3
     case ARM::t2STRi8:     // A7.7.158 Encoding T4
-    case ARM::t2STR_PRE:   // A7.7.158 Encoding T4; pre-index
-    case ARM::t2STR_POST:  // A7.7.158 Encoding T4; post-index
+    case ARM::t2STR_PRE:   // A7.7.158 Encoding T4; pre-indexed
+    case ARM::t2STR_POST:  // A7.7.158 Encoding T4; post-indexed
     case ARM::tSTRr:       // A7.7.159 Encoding T1
     case ARM::t2STRs:      // A7.7.158 Encoding T2
+    // store double word
+    case ARM::t2STRDi8:    // A7.7.163 Encoding T1
+    case ARM::t2STRD_PRE:  // A7.7.163 Encoding T1; pre-indexed
+    case ARM::t2STRD_POST: // A7.7.163 Encoding T1; post-indexed
+
+    case ARM::VSTRS:
       return ARM::t2STRT;
 
     // store half word
     case ARM::tSTRHi:      // A7.7.167 Encoding T1
     case ARM::t2STRHi12:   // A7.7.167 Encoding T2
     case ARM::t2STRHi8:    // A7.7.167 Encoding T3; not write back
-    case ARM::t2STRH_PRE:  // A7.7.160 Encoding T3; pre-index
-    case ARM::t2STRH_POST: // A7.7.160 Encoding T3; post-index
+    case ARM::t2STRH_PRE:  // A7.7.160 Encoding T3; pre-indexed
+    case ARM::t2STRH_POST: // A7.7.160 Encoding T3; post-indexed
     case ARM::tSTRHr:      // A7.7.168 Encoding T1
     case ARM::t2STRHs:     // A7.7.168 Encoding T2
       return ARM::t2STRHT;
@@ -84,8 +90,8 @@ static unsigned getNewOpcode(unsigned opcode) {
     case ARM::tSTRBi:      // A7.7.160 Encoding T1
     case ARM::t2STRBi12:   // A7.7.160 Encoding T2
     case ARM::t2STRBi8:    // A7.7.160 Encoding T3; not write back
-    case ARM::t2STRB_PRE:  // A7.7.160 Encoding T3; pre-index
-    case ARM::t2STRB_POST: // A7.7.160 Encoding T3; post-index
+    case ARM::t2STRB_PRE:  // A7.7.160 Encoding T3; pre-indexed
+    case ARM::t2STRB_POST: // A7.7.160 Encoding T3; post-indexed
     case ARM::tSTRBr:      // A7.7.161 Encoding T1
     case ARM::t2STRBs:     // A7.7.161 Encoding T2
       return ARM::t2STRBT;
@@ -496,6 +502,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
     for (MachineInstr &MI : MBB) {
       unsigned opcode = MI.getOpcode();
       unsigned sourceReg = 0;
+      unsigned sourceReg2 = 0; // for STRD
       unsigned baseReg = 0;
       unsigned offsetReg = 0; // for STR(register) 
       int64_t imm = 0;
@@ -554,7 +561,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
         
-        // STR(register); A7.7.159 
+        // STR (register); A7.7.159 
         case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
         case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
 #if 1
@@ -566,8 +573,26 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
 
+        // STRD (immediate); A7.7.163; Encoding T1
+        case ARM::t2STRDi8:  // no write back
+#if 1
+          sourceReg = MI.getOperand(0).getReg();
+          sourceReg2 = MI.getOperand(1).getReg();
+          baseReg = MI.getOperand(2).getReg();
+          imm = MI.getOperand(3).getImm();
+          convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+          convertSTRimm(MBB, &MI, sourceReg2, baseReg, imm + 4, newOpcode, DL, TII);
+          originalStores.push_back(&MI);
+#endif
+          break;
+        
+        // STRD (immediate) with write back
+        case ARM::t2STRD_PRE:
+        case ARM::t2STRD_POST:
+          // TO-DO
+          break;
+
         // Floating stores.
-        //
         case ARM::VSTRS:
           break;
 
