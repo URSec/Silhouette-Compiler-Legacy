@@ -97,11 +97,14 @@ static unsigned getNewOpcode(unsigned opcode) {
 
 
 //
-// Method: buildSTRT
+// Method: buildUnprivStr
 //
 // Description:
-//   This method builds a unprivileged store instructions. It serves as a
-//   space-saver - this pass builds unprivileged stores a lot.
+//   This method builds an unprivileged store instruction.
+//   Unprivileged load/store instructions only support 8-bit immediate, ranging
+//   from 0 to 255; but a normal store can have an immediate as large as 1023.
+//   For an immediate greater than 255, we need to use extra add and sub 
+//   instructions. See the code for details.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
@@ -118,17 +121,34 @@ static unsigned getNewOpcode(unsigned opcode) {
 //
 // Return:
 //   None.
-
-static void buildSTRT(MachineBasicBlock &MBB,
+static void buildUnprivStr(MachineBasicBlock &MBB,
                       MachineInstr *MI,
-                      unsigned sourceReg, unsigned baseReg, uint8_t imm,
+                      unsigned sourceReg, unsigned baseReg, uint64_t imm,
                       unsigned newInstrOpcode,
                       DebugLoc &DL,
                       const TargetInstrInfo *TII) {
-  BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
-    .addReg(sourceReg)
-    .addReg(baseReg)
-    .addImm(imm);
+  if (imm <= 255) {
+    // If the imm is less than 256, then just create an unprivileged store.
+    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+      .addReg(sourceReg)
+      .addReg(baseReg)
+      .addImm(imm);
+  } else {
+      // If the imm is greater than 255, we need to add the imm to the base 
+      // register first, create an unprivileged store, and then restore the 
+      // base register.
+      BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
+        .addReg(baseReg)
+        .addImm(imm)
+        .addImm(ARMCC::AL).addReg(0);
+
+      buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+
+      BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
+        .addReg(baseReg)
+        .addImm(imm)
+        .addImm(ARMCC::AL).addReg(0);
+  }
 }
 
 
@@ -176,7 +196,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
       .addImm(-imm);
     
     // insert a new unprivileged store
-    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
 
     // restore the base register
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
@@ -184,7 +204,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
       .addReg(baseReg)
       .addImm(-imm);
   } else {
-    buildSTRT(MBB, MI, sourceReg, baseReg, imm, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newInstrOpcode, DL, TII);
   }
 }
 
@@ -276,11 +296,12 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
     }
 
     // Second, build a new store.
-    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+
   } else {
     // This is a post-indexed store.
     // First, build a new store.
-    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
 
     // Second, update the imm to the base register
     if (imm < 0) {
@@ -353,7 +374,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(offsetReg);
 
     // Build an unprivileged store.
-    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
 
     // Restore the base register.
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
@@ -361,9 +382,9 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(baseReg)
       .addReg(offsetReg);
   } else {
+
     // STR(registr) Encoding T2; with lsl
     uint8_t imm = MI->getOperand(3).getImm();
-
     // Add up the base and offset registers (add with lsl).
     BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDrs), baseReg)
       .addReg(baseReg).addReg(offsetReg)
@@ -372,7 +393,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(0);  // opt:%noreg
 
     // Build an unprivileged store.
-    buildSTRT(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
 
     // Restore the base register.
     BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBrs), baseReg)
@@ -479,9 +500,10 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       unsigned offsetReg = 0; // for STR(register) 
       int64_t imm = 0;
       unsigned newOpcode = getNewOpcode(opcode);
-      
+
       switch (opcode) {
-#if 1
+        // Integer stores.
+        //
         // store immediate; A7.7.158 STR (immediate)
         case ARM::tSTRi:      // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:    // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
@@ -495,6 +517,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRBi:     // A7.7.160 Encoding T1
         case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
         case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -531,16 +554,9 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
         
-        // store register
-        // STR (register); A7.7.159 
+        // STR(register); A7.7.159 
         case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
-        case ARM::t2STRs: // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-        // STRH (register); A7.7.168
-        case ARM::tSTRHr: // Encoding T1: STRH<c> <Rt>,[<Rn>,<Rm>
-        case ARM::t2STRHs: // Encoding T2: STRH<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-        // STRB (register); A7.7.161
-        case ARM::tSTRBr:  // Encoding T1: STRB<c> <Rt>,[<Rn>,<Rm>]
-        case ARM::t2STRBs: // Encoding T2: STRB<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+        case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
 #if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
@@ -548,6 +564,11 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           convertSTRReg(MBB, &MI, sourceReg, baseReg, offsetReg, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
+          break;
+
+        // Floating stores.
+        //
+        case ARM::VSTRS:
           break;
 
         // PUSH is a special store
@@ -558,7 +579,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         default:
           if (MI.mayStore()) {
-#if 1
+#if 0
             errs() << "Silhouette: other stores; dump: ";
             printOperands(MI);
 #endif

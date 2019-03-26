@@ -558,8 +558,6 @@ void ARMPassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createARMOptimizeBarriersPass());
 
-  addPass(createARMConstantIslandPass());
-
   // Add Silhouette passes.
   if (EnableSilhouetteStr2Strt) {
     addPass(createARMSilhouetteSTR2STRT());
@@ -568,4 +566,7 @@ void ARMPassConfig::addPreEmitPass() {
   if (EnableSilhouetteMemOverhead) {
     addPass(createARMSilhouetteMemOverhead());
   }
+
+  addPass(createARMConstantIslandPass());
+
 }
