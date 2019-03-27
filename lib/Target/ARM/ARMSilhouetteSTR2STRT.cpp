@@ -72,8 +72,9 @@ static unsigned getNewOpcode(unsigned opcode) {
     case ARM::t2STRDi8:    // A7.7.163 Encoding T1
     case ARM::t2STRD_PRE:  // A7.7.163 Encoding T1; pre-indexed
     case ARM::t2STRD_POST: // A7.7.163 Encoding T1; post-indexed
-
-    case ARM::VSTRS:
+    // store floating-point register
+    case ARM::VSTRD:       // A7.7.256 Encoding T1; store double word
+    case ARM::VSTRS:       // A7.7.256 Encoding T2; store single word
       return ARM::t2STRT;
 
     // store half word
@@ -118,7 +119,7 @@ static unsigned getNewOpcode(unsigned opcode) {
 //   sourceReg - The register whose contents will be stored to some memory address.
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newInstrOpcode - The opcode of the unprivileged store.
+//   newOpcode - The opcode of the unprivileged store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
@@ -130,12 +131,12 @@ static unsigned getNewOpcode(unsigned opcode) {
 static void buildUnprivStr(MachineBasicBlock &MBB,
                       MachineInstr *MI,
                       unsigned sourceReg, unsigned baseReg, uint64_t imm,
-                      unsigned newInstrOpcode,
+                      unsigned newOpcode,
                       DebugLoc &DL,
                       const TargetInstrInfo *TII) {
   if (imm <= 255) {
     // If the imm is less than 256, then just create an unprivileged store.
-    BuildMI(MBB, MI, DL, TII->get(newInstrOpcode))
+    BuildMI(MBB, MI, DL, TII->get(newOpcode))
       .addReg(sourceReg)
       .addReg(baseReg)
       .addImm(imm);
@@ -148,7 +149,7 @@ static void buildUnprivStr(MachineBasicBlock &MBB,
         .addImm(imm)
         .addImm(ARMCC::AL).addReg(0);
 
-      buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+      buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
       BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
         .addReg(baseReg)
@@ -173,7 +174,7 @@ static void buildUnprivStr(MachineBasicBlock &MBB,
 //   sourceReg - The register whose contents will be stored to some memory address.
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newInstrOpcode - The opcode of the unprivileged store.
+//   newOpcode - The opcode of the unprivileged store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
@@ -186,12 +187,9 @@ static void buildUnprivStr(MachineBasicBlock &MBB,
 void convertSTRimm(MachineBasicBlock &MBB,
                      MachineInstr *MI,
                      unsigned sourceReg, unsigned baseReg, int64_t imm,
-                     unsigned newInstrOpcode,
+                     unsigned newOpcode,
                      DebugLoc &DL,
                      const TargetInstrInfo *TII) {
-  
-  // TO-DO: baseReg could be SP, which should be handled individually.
-  
   // Unprivileged stores only support positive imm. If imm is a negative, then 
   // we need to sub this imm to the base register, give 0 to the imm field of 
   // the new str, and restore the base registr.
@@ -202,7 +200,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
       .addImm(-imm);
     
     // insert a new unprivileged store
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // restore the base register
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
@@ -210,7 +208,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
       .addReg(baseReg)
       .addImm(-imm);
   } else {
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
   }
 }
 
@@ -245,7 +243,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
 //   sourceReg - The register whose contents will be stored to some memory address.
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newInstrOpcode - The opcode of the unprivileged store.
+//   newOpcode - The opcode of the unprivileged store.
 //   preIndex - Indicate the original instruction is pre-indexed or post-indexed.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
@@ -260,7 +258,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
                           MachineInstr *MI,
                           unsigned sourceReg, unsigned baseReg, int64_t imm,
                           bool preIndex,
-                          unsigned newInstrOpcode,
+                          unsigned newOpcode,
                           DebugLoc &DL,
                           const TargetInstrInfo *TII) {
   if (preIndex == true) {
@@ -302,12 +300,12 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
     }
 
     // Second, build a new store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
   } else {
     // This is a post-indexed store.
     // First, build a new store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // Second, update the imm to the base register
     if (imm < 0) {
@@ -356,7 +354,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
 //   sourceReg - The register whose contents will be stored to some memory address.
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newInstrOpcode - The opcode of the unprivileged store.
+//   newOpcode - The opcode of the unprivileged store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
@@ -368,7 +366,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
 //
 void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
                    unsigned sourceReg, unsigned baseReg, unsigned offsetReg,
-                   unsigned newInstrOpcode,
+                   unsigned newOpcode,
                    DebugLoc &DL,
                    const TargetInstrInfo *TII) {
   if (MI->getNumExplicitOperands() == 5) {
@@ -380,7 +378,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(offsetReg);
 
     // Build an unprivileged store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // Restore the base register.
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
@@ -399,7 +397,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(0);  // opt:%noreg
 
     // Build an unprivileged store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newInstrOpcode, DL, TII);
+    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // Restore the base register.
     BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBrs), baseReg)
@@ -407,6 +405,92 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
       .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm)) 
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
       .addReg(0);  // opt:%noreg
+  }
+}
+
+
+//
+// Function: convertVSTR()
+//
+// Description:
+//   This function convert a floating-point store (VSTR) to STRT. Here are the
+//   algorithm:
+//   1. pick general-purpose register(s) and push it/them onto the stack.
+//   2. move FP register to general-purpose register(s)
+//   3. create unprivileged store(s).
+//   4. restore (pop) general-purpose register(s).
+//
+//   ARMv7-M has nice push/pop instructions that can push/pop multiple registers
+//   with one single instruction. It also has instructions (VMOV) that can move
+//   a double-precision register to two general-purpose registers.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   sourceReg - The register whose contents will be stored to some memory address.
+//   baseReg - The register used as the base register to compute the memory address.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   newOpcode - The opcode of the unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   One or more unprivileged stores, one extra push, and one extra pop.
+//
+void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
+                 unsigned sourceReg, unsigned baseReg, uint16_t imm,
+                 unsigned newOpcode,
+                 DebugLoc &DL, const TargetInstrInfo *TII) {
+  unsigned opcode = MI->getOpcode();
+
+  if (opcode == ARM::VSTRS) {
+    // store a single-precision register 
+    // First, pick a general-purpose reigster and push it onto the stack. 
+    unsigned R0 = ARM::R0;  // Just pick r0.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .addReg(R0);
+
+    // The push increased SP by 4 bytes.
+    if (baseReg == ARM::SP) imm += 4;
+
+    // Second, move from FP register to the general-purpose register.
+    BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), R0)
+      .addReg(R0)
+      .addReg(sourceReg);
+
+    // Third, create an unprivileged store.
+    convertSTRimm(MBB, MI, R0, baseReg, imm, newOpcode, DL, TII);
+
+    // Finally, restore the general-purpose register.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
+      .addImm(ARMCC::AL).addReg(0)
+      .addReg(R0);
+  } else if (opcode == ARM::VSTRD) {
+    // store a double-precision register (two single-precision registers)
+    // First, pick two general-purpose reigsters and push them onto the stack. 
+    unsigned R0 = ARM::R0, R1 = ARM::R1;   // Pick r0 and r1.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .addReg(R0).addReg(R1);
+  
+    // The push increased SP by 9 bytes.
+    if (baseReg == ARM::SP) imm += 8;
+
+    // Second, move the double word to the two general-purpose registers.
+    BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRRD))
+      .addReg(R0).addReg(R1)
+      .addReg(sourceReg)
+      .addImm(ARMCC::AL).addReg(0);  // pred:14, pred:%noreg
+
+    // Third, build unprivileged stores.
+    convertSTRimm(MBB, MI, R0, baseReg, imm, newOpcode, DL, TII);
+    convertSTRimm(MBB, MI, R1, baseReg, imm + 4, newOpcode, DL, TII);
+
+    // Last, restore r0, r1.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .addReg(R0).addReg(R1);
   }
 }
 
@@ -431,9 +515,11 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 // Return Value:
 //   None
 void debugHelper(MachineFunction &MF) {
-  errs() << "tSUBi3 = " << ARM::tSUBi3 << "\n";
-  errs() << "tSTRspi = " << ARM::tSTRspi << "\n";
-  errs() << "t2STR_PRE = " << ARM::t2STR_PRE << "\n";
+  if (MF.getName() != "main") return;
+
+  errs() << "R0 = " << ARM::R0 << ", R1 = " << ARM::R1 << ".\n";
+  errs() << "S0 = " << ARM::S0 << ", S1 = " << ARM::S1 << ".\n";
+  errs() << "D0 = " << ARM::D0 << ", D1 = " << ARM::D1 << ".\n";
 }
 
 
@@ -481,6 +567,7 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
+  debugHelper(MF);
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
@@ -524,7 +611,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRBi:     // A7.7.160 Encoding T1
         case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
         case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -551,7 +638,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store byte; A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
         case ARM::t2STRB_PRE:   // pre-indexed store
         case ARM::t2STRB_POST:  // post-index store
-#if 1
+#if 0
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
@@ -564,7 +651,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // STR (register); A7.7.159 
         case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
         case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           offsetReg = MI.getOperand(2).getReg();
@@ -575,7 +662,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         // STRD (immediate); A7.7.163; Encoding T1
         case ARM::t2STRDi8:  // no write back
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           sourceReg2 = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(2).getReg();
@@ -594,12 +681,21 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         // Floating stores.
         case ARM::VSTRS:
+        case ARM::VSTRD:
+#if 1
+          sourceReg = MI.getOperand(0).getReg();
+          baseReg = MI.getOperand(1).getReg();
+          imm = (MI.getOperand(2).getImm()) << 2;
+          convertVSTR(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+          originalStores.push_back(&MI);
+          
+#endif
           break;
 
         // PUSH is a special store
         // ignore them for now.
         case ARM::tPUSH:
-          // TO-DO
+          // TO-DO?
           break;
 
         default:
@@ -611,7 +707,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           }
           break;
       }
-
     }
 
     // remove the original stores
