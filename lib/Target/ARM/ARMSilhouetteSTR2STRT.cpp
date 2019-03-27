@@ -648,10 +648,16 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
         
-        // STR (register); A7.7.159 
-        case ARM::tSTRr: // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
+        // store register; A7.7.159 
+        case ARM::tSTRr:   // Encoding T1: STR<c> <Rt>,[<Rn>,<Rm>]
         case ARM::t2STRs:  // Encoding T2: STR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-#if 0
+        // store register halfword; A7.7.168
+        case ARM::tSTRHr:  // Encoding T1: STRH<c> <Rt>,[<Rn>,<Rm>]
+        case ARM::t2STRHs: // Encoding T2: STRH<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+        // store register byte; A7.7.161
+        case ARM::tSTRBr:  // Encoding T1: STRB<c> <Rt>,[<Rn>,<Rm>]
+        case ARM::t2STRBs: // Encoding T2: STRB<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           offsetReg = MI.getOperand(2).getReg();
@@ -682,7 +688,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Floating stores.
         case ARM::VSTRS:
         case ARM::VSTRD:
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
