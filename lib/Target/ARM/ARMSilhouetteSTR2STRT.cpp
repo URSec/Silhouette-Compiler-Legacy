@@ -446,7 +446,8 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
                  unsigned newOpcode,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
   unsigned opcode = MI->getOpcode();
-  unsigned R0 = ARM::R0;
+  unsigned R0 = ARM::R0, R1 = ARM::R1, SP = ARM::SP;
+  unsigned baseRegNum = baseReg - R0; 
 
   if (opcode == ARM::VSTRS) {
     // store a single-precision register 
@@ -454,12 +455,12 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     // First, pick a general-purpose reigster.
     // There is a potential pitfall here: we cannot pick the base register 
     // otherwise it'd destroy the destination address to store.
-    unsigned interimReg = R0;
-    while (interimReg < R0 + GP_REGULAR_REG_NUM) {
-      if (interimReg != baseReg) break;
-      interimReg++;
-    }
-
+    //
+    // Here we use a O(1) algorithm rather than a O(n) one. 
+    // (n == GP_REGULAR_REG_NUM) This may not be faster than the O(n) one 
+    // in practice, but it's definitely cooler. :-)    -Jie
+    unsigned interimReg = baseReg == SP ? R0 : (baseRegNum  + 1) % GP_REGULAR_REG_NUM + R0;
+    
     // Second, push the selected register onto the stack.
     BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
@@ -482,20 +483,19 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(interimReg);
   } else if (opcode == ARM::VSTRD) {
     // store a double-precision register (two single-precision registers)
-    // First, pick two general-purpose reigsters.
-    unsigned interimReg0, interimReg1, nextRegCandidate = R0;
-    unsigned assignedNum = 0;
-    while (assignedNum < 2) {
-      if (nextRegCandidate == baseReg) {
-        nextRegCandidate++;
-        continue;
-      }
-      if (assignedNum == 0) {
-        assignedNum++;
-        interimReg0 = nextRegCandidate++;
-      } else {
-        interimReg1 = nextRegCandidate;
-        break;
+    
+    // First, pick two general-purpose reigsters. 
+    unsigned interimReg0, interimReg1;
+    if (baseReg == SP) {
+      interimReg0 = R0, interimReg1 = R1;
+    } else {
+      interimReg0 = (baseRegNum + 1) % GP_REGULAR_REG_NUM + R0;
+      interimReg1 = (baseRegNum + 2) % GP_REGULAR_REG_NUM + R0;
+      if (interimReg1 < interimReg0) {
+        // The Code Generator only allows to push/pop registers in an 
+        // increasingly sorted order.
+        unsigned tmp = interimReg0;
+        interimReg0 = interimReg1, interimReg1 = tmp;
       }
     }
 
@@ -548,9 +548,12 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
 void debugHelper(MachineFunction &MF) {
   if (MF.getName() != "main") return;
 
-  errs() << "R0 = " << ARM::R0 << ", R1 = " << ARM::R1 << ".\n";
+  errs() << "R0 = " << ARM::R0 << ", R12 = " << ARM::R12 << ".\n";
+  errs() << "SP = " << ARM::SP << ", PC = " << ARM::PC << ".\n";
+#if 0
   errs() << "S0 = " << ARM::S0 << ", S1 = " << ARM::S1 << ".\n";
   errs() << "D0 = " << ARM::D0 << ", D1 = " << ARM::D1 << ".\n";
+#endif
 }
 
 
@@ -599,6 +602,8 @@ static void printOperands(MachineInstr &MI) {
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   /* return false; */
+  debugHelper(MF);
+
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
@@ -720,7 +725,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::VSTRS:
         case ARM::VSTRD:
 #if 1
-          printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
