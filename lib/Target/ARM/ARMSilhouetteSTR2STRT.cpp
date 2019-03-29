@@ -25,6 +25,9 @@
 
 using namespace llvm;
 
+// number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
+#define GP_REGULAR_REG_NUM 13  
+
 char ARMSilhouetteSTR2STRT::ID = 0;
 
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
@@ -210,6 +213,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
   } else {
     buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
   }
+
 }
 
 
@@ -442,57 +446,84 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
                  unsigned newOpcode,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
   unsigned opcode = MI->getOpcode();
+  unsigned R0 = ARM::R0;
 
   if (opcode == ARM::VSTRS) {
     // store a single-precision register 
-    // First, pick a general-purpose reigster and push it onto the stack. 
-    unsigned R0 = ARM::R0;  // Just pick r0.
+    
+    // First, pick a general-purpose reigster.
+    // There is a potential pitfall here: we cannot pick the base register 
+    // otherwise it'd destroy the destination address to store.
+    unsigned interimReg = R0;
+    while (interimReg < R0 + GP_REGULAR_REG_NUM) {
+      if (interimReg != baseReg) break;
+      interimReg++;
+    }
+
+    // Second, push the selected register onto the stack.
     BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(R0);
+      .addReg(interimReg);
 
-    // The push increased SP by 4 bytes.
+    // The push increased SP by 4 bytes; so imm needs to be updated.
     if (baseReg == ARM::SP) imm += 4;
 
-    // Second, move from FP register to the general-purpose register.
-    BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), R0)
-      .addReg(R0)
+    // Third, move from FP register to the general-purpose register.
+    BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), interimReg)
+      .addReg(interimReg)
       .addReg(sourceReg);
 
-    // Third, create an unprivileged store.
-    convertSTRimm(MBB, MI, R0, baseReg, imm, newOpcode, DL, TII);
+    // Forth, create an unprivileged store.
+    convertSTRimm(MBB, MI, interimReg, baseReg, imm, newOpcode, DL, TII);
 
     // Finally, restore the general-purpose register.
     BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
       .addImm(ARMCC::AL).addReg(0)
-      .addReg(R0);
+      .addReg(interimReg);
   } else if (opcode == ARM::VSTRD) {
     // store a double-precision register (two single-precision registers)
-    // First, pick two general-purpose reigsters and push them onto the stack. 
-    unsigned R0 = ARM::R0, R1 = ARM::R1;   // Pick r0 and r1.
+    // First, pick two general-purpose reigsters.
+    unsigned interimReg0, interimReg1, nextRegCandidate = R0;
+    unsigned assignedNum = 0;
+    while (assignedNum < 2) {
+      if (nextRegCandidate == baseReg) {
+        nextRegCandidate++;
+        continue;
+      }
+      if (assignedNum == 0) {
+        assignedNum++;
+        interimReg0 = nextRegCandidate++;
+      } else {
+        interimReg1 = nextRegCandidate;
+        break;
+      }
+    }
+
+    // Second, push the two selected registers onto the stack.
     BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(R0).addReg(R1);
+      .addReg(interimReg0).addReg(interimReg1);
   
-    // The push increased SP by 9 bytes.
+    // The push increased SP by 8 bytes.
     if (baseReg == ARM::SP) imm += 8;
 
-    // Second, move the double word to the two general-purpose registers.
+    // Third, move the double word to the two general-purpose registers.
     BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRRD))
-      .addReg(R0).addReg(R1)
+      .addReg(interimReg0).addReg(interimReg1)
       .addReg(sourceReg)
       .addImm(ARMCC::AL).addReg(0);  // pred:14, pred:%noreg
 
-    // Third, build unprivileged stores.
-    convertSTRimm(MBB, MI, R0, baseReg, imm, newOpcode, DL, TII);
-    convertSTRimm(MBB, MI, R1, baseReg, imm + 4, newOpcode, DL, TII);
+    // Forth, build unprivileged stores.
+    convertSTRimm(MBB, MI, interimReg0, baseReg, imm, newOpcode, DL, TII);
+    convertSTRimm(MBB, MI, interimReg1, baseReg, imm + 4, newOpcode, DL, TII);
 
     // Last, restore r0, r1.
     BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(R0).addReg(R1);
+      .addReg(interimReg0).addReg(interimReg1);
   }
 }
+
 
 
 //
@@ -567,7 +598,7 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
-  debugHelper(MF);
+  /* return false; */
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
@@ -591,7 +622,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       unsigned sourceReg = 0;
       unsigned sourceReg2 = 0; // for STRD
       unsigned baseReg = 0;
-      unsigned offsetReg = 0; // for STR(register) 
+      unsigned offsetReg = 0;  // for STR(register) 
       int64_t imm = 0;
       unsigned newOpcode = getNewOpcode(opcode);
 
@@ -611,7 +642,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRBi:     // A7.7.160 Encoding T1
         case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
         case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
-#if 0
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -638,7 +669,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store byte; A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
         case ARM::t2STRB_PRE:   // pre-indexed store
         case ARM::t2STRB_POST:  // post-index store
-#if 0
+#if 1
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
@@ -668,7 +699,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         // STRD (immediate); A7.7.163; Encoding T1
         case ARM::t2STRDi8:  // no write back
-#if 0
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           sourceReg2 = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(2).getReg();
@@ -688,7 +719,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Floating stores.
         case ARM::VSTRS:
         case ARM::VSTRD:
-#if 0
+#if 1
+          printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
@@ -701,6 +733,11 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // PUSH is a special store
         // ignore them for now.
         case ARM::tPUSH:
+          // TO-DO?
+          break;
+
+        // inline assembly
+        case ARM::INLINEASM:
           // TO-DO?
           break;
 
