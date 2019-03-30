@@ -23,6 +23,8 @@
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteConvertFuncList.h"
 
+#include <vector>
+
 using namespace llvm;
 
 // number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
@@ -78,6 +80,12 @@ static unsigned getNewOpcode(unsigned opcode) {
     // store floating-point register
     case ARM::VSTRD:       // A7.7.256 Encoding T1; store double word
     case ARM::VSTRS:       // A7.7.256 Encoding T2; store single word
+    // store multiple registers to memory
+    case ARM::tSTMIA_UPD:  // A7.7.156 Encoding T1; store with write back
+    case ARM::t2STMIA:     // A7.7.156 Encoding T2; no write back
+    case ARM::t2STMIA_UPD: // A7.7.156 Encoding T2; with write back
+    case ARM::t2STMDB:     // A7.7.157 Encoding T1; no write back
+    case ARM::t2STMDB_UPD: // A7.7.157 Encoding T1; with write back
       return ARM::t2STRT;
 
     // store half word
@@ -524,6 +532,110 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
   }
 }
 
+//
+// Function: convertSTM()
+//
+// Description:
+//   This function converts a store-multiple-word, i.e., STM or STMDB, to 
+//   multiple STRT. It builds multiple STRT for all the registers, and then
+//   update the base register as needed.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   baseReg - The register used as the base register to get the memory address.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   One or more STRT and one or two add/sub as needed.
+//   
+static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
+                 unsigned baseReg,
+                 DebugLoc &DL, const TargetInstrInfo *TII) {
+  unsigned opcode = MI->getOpcode();
+  unsigned newOpcode = ARM::t2STRT;
+
+  unsigned numOfReg; 
+  std::vector<unsigned> regList;
+
+  // Get the list of reigsters to store.
+  if (opcode == ARM::t2STMIA || opcode == ARM::t2STMDB) {
+    // The non-write-back and write-back stores have different encodings.
+    // For t2STMIA, the MI operands are: baseReg, pred:14, pred:%noreg, and 
+    // register list, while for an write-back store, the MI operands are 
+    // baseReg (def), baseReg (use), pred:14, pred:%noreg, and register list.
+    //
+    // Potential hazard: I've never seen t2STMDB in test programs; I'm not sure
+    // if t2STMDB has the similar MI encoding as t2STMIA.
+    numOfReg = MI->getNumOperands() - 3;
+    for (unsigned i = 0; i < numOfReg; i++) {
+      regList.push_back(MI->getOperand(i + 3).getReg());
+    }
+  } else {
+    numOfReg = MI->getNumOperands() - 4;
+    for (unsigned i = 0; i < numOfReg; i++) {
+      regList.push_back(MI->getOperand(i + 4).getReg());
+    }
+  }
+  
+  if (opcode == ARM::tSTMIA_UPD ||   // Encoding T1; must write back
+      opcode == ARM::t2STMIA ||      // Encoding T2; no write back
+      opcode == ARM::t2STMIA_UPD) {  // Encoding T2; with write back
+    // STM: Store Multiple
+    
+    // Store all registers to addresses starting from baseReg
+    for (unsigned i = 0; i < numOfReg; i++) {
+      buildUnprivStr(MBB, MI, regList[i], baseReg, i * 4, newOpcode, DL, TII);
+    }
+
+    // If this is a write-back store, update the baseReg.
+    if (opcode != ARM::t2STMIA) {
+      if (baseReg == ARM::SP) {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg)
+          .addImm(numOfReg);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+          .addDef(ARM::CPSR, RegState::Dead)
+          .addUse(baseReg)
+          .addImm(numOfReg << 2);
+      }
+    }
+  } else {
+    // STMDB: Store Multiple Decrement Before
+    // First, sub the base register to be the starting address of store.
+    if (baseReg == ARM::SP) {
+      BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
+        .addReg(baseReg)
+        .addImm(numOfReg);
+    } else {
+      BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
+        .addDef(ARM::CPSR, RegState::Dead)
+        .addUse(baseReg)
+        .addImm(numOfReg << 2);
+    }
+
+    // Store all the registers.
+    for (unsigned i = 0; i < numOfReg; i++) {
+      buildUnprivStr(MBB, MI, regList[i], baseReg, i * 4, newOpcode, DL, TII);
+    }
+
+    // If this is not a write-back store, we need restore base register.
+    if (opcode == ARM::t2STMDB) {
+      if (baseReg == ARM::SP) {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg)
+          .addImm(numOfReg);
+      } else {
+        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
+          .addDef(ARM::CPSR, RegState::Dead)
+          .addUse(baseReg)
+          .addImm(numOfReg << 2);
+      }
+    }
+  }
+}
 
 
 //
@@ -601,13 +713,10 @@ static void printOperands(MachineInstr &MI) {
 //   false - The MachineFunction was not transformed.
 //
 bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
-  /* return false; */
-  debugHelper(MF);
-
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
-  
+
 #if 0
   // instrument certain functions
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
@@ -709,6 +818,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           sourceReg2 = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(2).getReg();
           imm = MI.getOperand(3).getImm();
+          // Although the imm is ZeroExtended by two bits, we don't need do 
+          // anthing here because the MIR is already encoded with the real imm.
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           convertSTRimm(MBB, &MI, sourceReg2, baseReg, imm + 4, newOpcode, DL, TII);
           originalStores.push_back(&MI);
@@ -731,6 +842,19 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           convertVSTR(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
           
+#endif
+          break;
+
+        // Store multiple words (integer).
+        case ARM::tSTMIA_UPD:   // A7.7.156 Encoding T1: STM<c> <Rn>!,<registers>
+        case ARM::t2STMIA:      // A7.7.156 Encoding T2; no write back
+        case ARM::t2STMIA_UPD:  // A7.7.156 Encoding T2; with write back
+        case ARM::t2STMDB:      // A7.7.157 Encoding T1; no write back
+        case ARM::t2STMDB_UPD:  // A7.7.157 Encoding T1; with write back
+#if 1
+          baseReg = MI.getOperand(0).getReg();
+          convertSTM(MBB, &MI, baseReg, DL, TII);
+          originalStores.push_back(&MI);
 #endif
           break;
 
