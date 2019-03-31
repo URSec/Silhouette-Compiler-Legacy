@@ -442,7 +442,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 //   sourceReg - The register whose contents will be stored to some memory address.
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newOpcode - The opcode of the unprivileged store.
+//   isSinglePrecision - Indicate if it is a single-precision or double-precision store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
@@ -451,13 +451,13 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 //
 void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
                  unsigned sourceReg, unsigned baseReg, uint16_t imm,
-                 unsigned newOpcode,
+                 bool isSinglePrecision,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
-  unsigned opcode = MI->getOpcode();
+  unsigned newOpcode = ARM::t2STRT;
   unsigned R0 = ARM::R0, R1 = ARM::R1, SP = ARM::SP;
   unsigned baseRegNum = baseReg - R0; 
 
-  if (opcode == ARM::VSTRS) {
+  if (isSinglePrecision) {
     // store a single-precision register 
     
     // First, pick a general-purpose reigster.
@@ -489,7 +489,7 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
       .addImm(ARMCC::AL).addReg(0)
       .addReg(interimReg);
-  } else if (opcode == ARM::VSTRD) {
+  } else {
     // store a double-precision register (two single-precision registers)
     
     // First, pick two general-purpose reigsters. 
@@ -529,8 +529,9 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
       .addReg(interimReg0).addReg(interimReg1);
-  }
+  } 
 }
+
 
 //
 // Function: convertSTM()
@@ -636,6 +637,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
     }
   }
 }
+
 
 
 //
@@ -839,9 +841,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
-          convertVSTR(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+          convertVSTR(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::VSTRS, DL, TII);
           originalStores.push_back(&MI);
-          
 #endif
           break;
 
