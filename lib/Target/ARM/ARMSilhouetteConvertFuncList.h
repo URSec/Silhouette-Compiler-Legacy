@@ -21,7 +21,7 @@
 // development. Will take it out after the development is done.
 const static std::set<std::string> funcWhitelist = {
   // main and HAL lib functions without using timer
-#if 1
+#if 0
   "main",
   "HAL_IncTick",
   "HAL_GPIO_Init",
@@ -61,14 +61,21 @@ const static std::set<std::string> funcWhitelist = {
 
   // BEEBS benchmark
 #if 1
+  "benchmark",
   // cnt
   "Test",
   "Initialize",
   "InitSeed",
   "Sum",
   "RandomInteger",
-  
+
+  // dtoi
+  "strtod",
   // dijkstra
+  "enqueue",
+  "dequeue",
+  "qcount",
+  "dijkstra",
 #endif
 };
 
