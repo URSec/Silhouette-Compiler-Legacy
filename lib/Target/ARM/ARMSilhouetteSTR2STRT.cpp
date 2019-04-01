@@ -85,10 +85,12 @@ static unsigned getNewOpcode(unsigned opcode) {
     case ARM::t2STMIA:     // A7.7.156 Encoding T2; no write back
     case ARM::t2STMIA_UPD: // A7.7.156 Encoding T2; with write back
     case ARM::t2STMDB:     // A7.7.157 Encoding T1; no write back
-    case ARM::t2STMDB_UPD: // A7.7.157 Encoding T1; with write back
-    // store multiple FP registers to memory
-    case ARM::VSTMDDB_UPD: // A7.7.249 Encoding T1; double-precision registers,
-    case ARM::VSTMSDB_UPD: // A7.7.249 Encoding T1; single-precision registers,   
+    // push
+    case ARM::tPUSH:            // A7.7.99 Encoding T1;
+    case ARM::t2STMDB_UPD: // A7.7.99 Encoding T2; 
+    // store multiple FP registers to memory; actually they're VPUSH.
+    case ARM::VSTMDDB_UPD: // A7.7.249 Encoding T1; double-precision registers
+    case ARM::VSTMSDB_UPD: // A7.7.249 Encoding T1; single-precision registers
       return ARM::t2STRT;
 
     // store half word
@@ -642,6 +644,53 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
 }
 
 
+// Function convertPUSH()
+//
+// Description:
+//   This function converts a PUSH to one or multiple STRT and an addition sub
+//   (update the SP). 
+//   A push is essentially a STM with update. Maybe we should combine this 
+//   function with convertSTM().
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   One or more STRT and a SUB (SP minus immediate).
+//
+static void convertPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
+                        DebugLoc &DL, const TargetInstrInfo *TII) {
+  unsigned SP = ARM::SP;
+  unsigned opcode = MI->getOpcode();
+
+  // Get the register list.
+  unsigned numOfReg = MI->getNumOperands() - 4;
+  std::vector<unsigned> regList;
+  if (opcode == ARM::tPUSH) {
+    for (unsigned i = 2; i < numOfReg + 2; i++) {
+      regList.push_back(MI->getOperand(i).getReg());
+    }
+  } else {
+    // It is a t2STMDB_UPD.
+    for (unsigned i = 4; i < numOfReg + 4; i++) {
+      regList.push_back(MI->getOperand(i).getReg());
+    }
+  }
+
+  // Update SP.
+  BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+    .addReg(SP)
+    .addImm(numOfReg);
+
+  for (unsigned i = 0; i < numOfReg; i++) {
+    buildUnprivStr(MBB, MI, regList[i], SP, i * 4, ARM::t2STRT, DL, TII);
+  }
+}
+
+
 //
 // Function convertVPUSH()
 //
@@ -912,7 +961,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::t2STMIA:      // A7.7.156 Encoding T2; no write back
         case ARM::t2STMIA_UPD:  // A7.7.156 Encoding T2; with write back
         case ARM::t2STMDB:      // A7.7.157 Encoding T1; no write back
-        case ARM::t2STMDB_UPD:  // A7.7.157 Encoding T1; with write back
 #if 1
           baseReg = MI.getOperand(0).getReg();
           convertSTM(MBB, &MI, baseReg, DL, TII);
@@ -920,8 +968,16 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
 
+        // Push one or more registers.
+        // Push is a special case of STM.
+        case ARM::tPUSH:            // A7.7.99 Encoding T1;
+        case ARM::t2STMDB_UPD:      // A7.7.99 Encoding T2; 
+          convertPUSH(MBB, &MI, DL, TII);
+          originalStores.push_back(&MI);
+          break;
+
         // Store multiple FP registers.
-        // According to ARMInstrVFP.td, it looks like that Clang 4.0 didn't
+        // According to ARMInstrVFP.td, it looks like that LLVM 4.0 didn't
         // generate VSTM. VSTMDDB_UPD and VSTMSDB_UPD are aliases for vpush. 
         case ARM::VSTMDDB_UPD:  // VPUSH double-precision registers
         case ARM::VSTMSDB_UPD:  // VPUSH single-precision registers
@@ -931,12 +987,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
 
-        // PUSH is a special store
-        // ignore them for now.
-        case ARM::tPUSH:
-          // TO-DO?
-          break;
-
         // inline assembly
         case ARM::INLINEASM:
           // TO-DO?
@@ -944,7 +994,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         default:
           if (MI.mayStore()) {
-#if 0
+#if 1
             errs() << "Silhouette: other stores; dump: ";
             printOperands(MI);
 #endif
