@@ -86,6 +86,9 @@ static unsigned getNewOpcode(unsigned opcode) {
     case ARM::t2STMIA_UPD: // A7.7.156 Encoding T2; with write back
     case ARM::t2STMDB:     // A7.7.157 Encoding T1; no write back
     case ARM::t2STMDB_UPD: // A7.7.157 Encoding T1; with write back
+    // store multiple FP registers to memory
+    case ARM::VSTMDDB_UPD: // A7.7.249 Encoding T1; double-precision registers,
+    case ARM::VSTMSDB_UPD: // A7.7.249 Encoding T1; single-precision registers,   
       return ARM::t2STRT;
 
     // store half word
@@ -639,6 +642,64 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
 }
 
 
+//
+// Function convertVPUSH()
+//
+// Description:
+//   This function converts a VPUSH to multiple STRT.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   baseReg - The register used as the base register to get the memory address.
+//   isSinglePrecision - Indicate if it is a single-precision or double-precision store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   Multiple STRT and a sub to update the SP.
+//
+static void convertVPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
+                 bool isSinglePrecision,
+                 DebugLoc &DL, const TargetInstrInfo *TII) {
+
+  unsigned SP = ARM::SP;
+  // Get the register list.
+  unsigned numOfReg = MI->getNumOperands() - 4;
+  std::vector<unsigned> regList;
+  for (unsigned i = 0; i < numOfReg; i++) {
+    regList.push_back(MI->getOperand(i + 4).getReg());
+  }
+  
+  // Store multiple floating-point registers.
+  if (isSinglePrecision) {
+    // Update SP. 
+    // A VPUSH stores registersfrom the lower address to higher address.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP)
+      .addImm(numOfReg);
+
+    // Store all registers.
+    for (unsigned i = 0; i < numOfReg; i++) {
+      convertVSTR(MBB, MI, regList[i], SP, i * 4, true, DL, TII);
+    }
+  } else {
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP)
+      .addImm(numOfReg * 2);
+    for (unsigned i = 0; i < numOfReg; i++) {
+      convertVSTR(MBB, MI, regList[i], SP, i * 8, false, DL, TII);
+    }
+  }
+
+  // TO-DO: there is an optimization we can do here. 
+  // When storing multiple FP registers to consecutive memory addresses, for 
+  // each store, we push one or two interim registers onto the stack, use them, 
+  // and then pop back. Thus, there'd be unnecessary <pop, push> pairs generatd.
+  // We can remove these <pop, push> pairs to save both space and time.
+}
+
+
 
 //
 // Method: debugHelper()
@@ -855,6 +916,17 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #if 1
           baseReg = MI.getOperand(0).getReg();
           convertSTM(MBB, &MI, baseReg, DL, TII);
+          originalStores.push_back(&MI);
+#endif
+          break;
+
+        // Store multiple FP registers.
+        // According to ARMInstrVFP.td, it looks like that Clang 4.0 didn't
+        // generate VSTM. VSTMDDB_UPD and VSTMSDB_UPD are aliases for vpush. 
+        case ARM::VSTMDDB_UPD:  // VPUSH double-precision registers
+        case ARM::VSTMSDB_UPD:  // VPUSH single-precision registers
+#if 1
+          convertVPUSH(MBB, &MI, opcode == ARM::VSTMSDB_UPD, DL, TII);
           originalStores.push_back(&MI);
 #endif
           break;
