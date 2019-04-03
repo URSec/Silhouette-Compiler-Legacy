@@ -741,9 +741,10 @@ static void convertVPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
 
   // TO-DO: there is an optimization we can do here. 
   // When storing multiple FP registers to consecutive memory addresses, for 
-  // each store, we push one or two interim registers onto the stack, use them, 
-  // and then pop back. Thus, there'd be unnecessary <pop, push> pairs generatd.
-  // We can remove these <pop, push> pairs to save both space and time.
+  // each store, we store one or two interim registers onto the stack, use them, 
+  // and then pop back. Thus, there'd be unnecessary (and consecutive) 
+  // <pop, store> pairs generatd. We can remove these <pop, push> pairs to save 
+  // both space and running time.
 }
 
 
