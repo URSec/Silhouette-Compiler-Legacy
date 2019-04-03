@@ -226,7 +226,6 @@ void convertSTRimm(MachineBasicBlock &MBB,
   } else {
     buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
   }
-
 }
 
 
@@ -432,14 +431,13 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 // Description:
 //   This function convert a floating-point store (VSTR) to STRT. Here are the
 //   algorithm:
-//   1. pick general-purpose register(s) and push it/them onto the stack.
+//   1. pick general-purpose register(s) and store it/them onto the stack.
 //   2. move FP register to general-purpose register(s)
 //   3. create unprivileged store(s).
 //   4. restore (pop) general-purpose register(s).
 //
-//   ARMv7-M has nice push/pop instructions that can push/pop multiple registers
-//   with one single instruction. It also has instructions (VMOV) that can move
-//   a double-precision register to two general-purpose registers.
+//   ARMv7-M has instructions (VMOV) that can move a double-precision register 
+//   to two general-purpose registers.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
@@ -474,13 +472,14 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     // in practice, but it's definitely cooler. :-)    -Jie
     unsigned interimReg = baseReg == SP ? R0 : (baseRegNum  + 1) % GP_REGULAR_REG_NUM + R0;
     
-    // Second, push the selected register onto the stack.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
-      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(interimReg);
+    // Second, store the selected register onto the stack.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP)
+      .addReg(1);
+    buildUnprivStr(MBB, MI, interimReg, SP, 0, ARM::t2STRT, DL, TII);
 
-    // The push increased SP by 4 bytes; so imm needs to be updated.
-    if (baseReg == ARM::SP) imm += 4;
+    // Don't forget this.
+    if (baseReg == SP) imm += 4;
 
     // Third, move from FP register to the general-purpose register.
     BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), interimReg)
@@ -497,27 +496,26 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
   } else {
     // store a double-precision register (two single-precision registers)
     
-    // First, pick two general-purpose reigsters. 
+    // First, pick two general-purpose reigsters. We just pick R0 and R1 if 
+    // baseReg is neither R0 nor R1; otherwise pick R2 and R3. 
+    // Weirdly, if we pick R7 and R8 (or larger number registers), and use
+    // BuildMI to create push/pop, the generated binary would only have 
+    // push/pop {r7}. Is this a bug of LLVM?
     unsigned interimReg0, interimReg1;
-    if (baseReg == SP) {
-      interimReg0 = R0, interimReg1 = R1;
+    if (baseReg == R0 || baseReg == R1) {
+      interimReg0 = ARM::R2, interimReg1 = ARM::R3;
     } else {
-      interimReg0 = (baseRegNum + 1) % GP_REGULAR_REG_NUM + R0;
-      interimReg1 = (baseRegNum + 2) % GP_REGULAR_REG_NUM + R0;
-      if (interimReg1 < interimReg0) {
-        // The Code Generator only allows to push/pop registers in an 
-        // increasingly sorted order.
-        unsigned tmp = interimReg0;
-        interimReg0 = interimReg1, interimReg1 = tmp;
-      }
+      interimReg0 = ARM::R0, interimReg1 = ARM::R1;
     }
 
-    // Second, push the two selected registers onto the stack.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tPUSH))
-      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(interimReg0).addReg(interimReg1);
-  
-    // The push increased SP by 8 bytes.
+    // Second, store the two selected registers onto the stack.
+    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP)
+      .addImm(2);
+    buildUnprivStr(MBB, MI, interimReg0, SP, 0, ARM::t2STRT, DL, TII);
+    buildUnprivStr(MBB, MI, interimReg1, SP, 4, ARM::t2STRT, DL, TII);
+
+    // Don't forget this.
     if (baseReg == ARM::SP) imm += 8;
 
     // Third, move the double word to the two general-purpose registers.
