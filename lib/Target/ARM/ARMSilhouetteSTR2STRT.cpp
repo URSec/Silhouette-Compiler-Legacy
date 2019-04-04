@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/Statistic.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteConvertFuncList.h"
 
@@ -29,6 +30,12 @@ using namespace llvm;
 
 // number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
 #define GP_REGULAR_REG_NUM 13  
+
+#define DEBUG_TYPE "arm-silhouette-store-transformation"
+
+STATISTIC(CODE_SIZE, "code size of original program");
+STATISTIC(NEW_CODE_SIZE, "code size of transformed program");
+STATISTIC(MEM_OVERHEAD, "memory overhead in bytes");
 
 char ARMSilhouetteSTR2STRT::ID = 0;
 
@@ -748,6 +755,30 @@ static void convertVPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
 }
 
 
+//
+// Function getFuncCodeSize()
+//
+// Description:
+//   This function computes the code size of a MachineFunction.
+//
+// Inputs:
+//   MF - A reference to the target Machine Function.
+// 
+// Return:
+//   The size (in bytes) of the Machine Function.
+//
+static unsigned long getFuncCodeSize(MachineFunction &MF) {
+  const ARMBaseInstrInfo *ABII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
+  unsigned long codeSize = 0;
+  for (MachineBasicBlock &MB : MF) {
+    for (MachineInstr &MI : MB) {
+        codeSize += ABII->getInstSizeInBytes(MI);
+    }
+  }
+  
+  return codeSize;
+}
+
 
 //
 // Method: debugHelper()
@@ -835,6 +866,9 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
   // for debugging
   errs() << "Silhouette: hello from function: " << funcName << "\n";
+
+  // Compute the code size o the original machine function.
+  CODE_SIZE = getFuncCodeSize(MF);
 
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
   DebugLoc DL;
@@ -1007,6 +1041,10 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       MI->eraseFromParent();
     }
   }
+
+  // Compute the code size of the transformed machine function.
+  NEW_CODE_SIZE = getFuncCodeSize(MF);
+  MEM_OVERHEAD = NEW_CODE_SIZE - CODE_SIZE;
 
   // This pass modifies the program.
   return true;
