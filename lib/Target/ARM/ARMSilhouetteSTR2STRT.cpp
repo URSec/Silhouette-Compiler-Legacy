@@ -1041,10 +1041,17 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   codeSizeNew = getFuncCodeSize(MF);
 
   // Write the result to a file.
+  // The code size string is very small (funcName + original_code_size +
+  // new_code_size); raw_fd_ostream's "<<" operator ensures that the write is 
+  // atomic because essentially it uses write() to write to a file and according
+  // to http://man7.org/linux/man-pages/man7/pipe.7.html, any write with less
+  // than PIPE_BUF bytes (at least 4096) is guaranteed to be atomic.
   std::error_code EC;
   StringRef memStatFile("./code_size.stat");
-  raw_fd_ostream memStat(memStatFile, EC, sys::fs::F_Append);
-  memStat << funcName << ":" << codeSize << ":" << codeSizeNew << "\n";
+  raw_fd_ostream memStat(memStatFile, EC, sys::fs::OpenFlags::F_Append);
+  std::string funcCodeSize = funcName.str() + ":" + std::to_string(codeSize) \
+    + ":" + std::to_string(codeSizeNew) + "\n";
+  memStat << funcCodeSize;
 
   // This pass modifies the program.
   return true;
