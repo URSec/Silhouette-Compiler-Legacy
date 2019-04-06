@@ -20,7 +20,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/Statistic.h"
+#include "llvm/Support/FileSystem.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteConvertFuncList.h"
 
@@ -30,12 +30,6 @@ using namespace llvm;
 
 // number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
 #define GP_REGULAR_REG_NUM 13  
-
-#define DEBUG_TYPE "arm-silhouette-store-transformation"
-
-STATISTIC(CODE_SIZE, "code size of original program");
-STATISTIC(NEW_CODE_SIZE, "code size of transformed program");
-STATISTIC(MEM_OVERHEAD, "memory overhead in bytes");
 
 char ARMSilhouetteSTR2STRT::ID = 0;
 
@@ -775,7 +769,7 @@ static unsigned long getFuncCodeSize(MachineFunction &MF) {
         codeSize += ABII->getInstSizeInBytes(MI);
     }
   }
-  
+
   return codeSize;
 }
 
@@ -867,8 +861,9 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   // for debugging
   errs() << "Silhouette: hello from function: " << funcName << "\n";
 
-  // Compute the code size o the original machine function.
-  CODE_SIZE = getFuncCodeSize(MF);
+  // Compute the code size of the original machine function.
+  unsigned codeSize = getFuncCodeSize(MF); 
+  unsigned codeSizeNew = 0;
 
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
   DebugLoc DL;
@@ -1043,8 +1038,13 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   }
 
   // Compute the code size of the transformed machine function.
-  NEW_CODE_SIZE = getFuncCodeSize(MF);
-  MEM_OVERHEAD = NEW_CODE_SIZE - CODE_SIZE;
+  codeSizeNew = getFuncCodeSize(MF);
+
+  // Write the result to a file.
+  std::error_code EC;
+  StringRef memStatFile("./code_size.stat");
+  raw_fd_ostream memStat(memStatFile, EC, sys::fs::F_Append);
+  memStat << funcName << ":" << codeSize << ":" << codeSizeNew << "\n";
 
   // This pass modifies the program.
   return true;
