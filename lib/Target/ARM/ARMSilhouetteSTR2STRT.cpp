@@ -177,6 +177,36 @@ static void buildUnprivStr(MachineBasicBlock &MBB,
 
 
 //
+// Function: buildITBlockAL()
+//
+// Description:
+//   This function inserts an IT instruction (A7.7.37) with ARMCC::AL (always 
+//   execute) as the condition code before an added instruction (usually tADDi8 
+//   and tSUBi8) that would update the processor status flags if they are 
+//   outside of an IT block. This function ensures that the generated new 
+//   instruction would not update the status flags; otherwise the sementics of 
+//   the program may get accidentally broken.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//   
+// Outputs:
+//   An IT instruction with ARMCC::Al as the firstcond and 8 as the mask.
+//
+static void buildITBlockAL(MachineBasicBlock &MBB, MachineInstr *MI,
+                        DebugLoc &DL, const TargetInstrInfo *TII) {
+  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT))
+    .addImm(ARMCC::AL) // always execute next instruction.
+    // 8 as the mask means this IT only manages the next one instruction.
+    // See A7.7.37 for more details about the mask.
+    .addImm(8); 
+}
+                      
+
+//
 // Method: convertSTRimm()
 //
 // Description:
@@ -211,6 +241,8 @@ void convertSTRimm(MachineBasicBlock &MBB,
   // we need to sub this imm to the base register, give 0 to the imm field of 
   // the new str, and restore the base registr.
   if (imm < 0) {
+    // This sub will update the status flags; we need put it in a IT block.
+    buildITBlockAL(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -220,6 +252,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
     buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // restore the base register
+    buildITBlockAL(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -294,6 +327,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
+        buildITBlockAL(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8))
           .addReg(baseReg)
           .addReg(baseReg)
@@ -309,6 +343,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
+        buildITBlockAL(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addReg(baseReg)
           .addReg(baseReg)
@@ -334,6 +369,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
+        buildITBlockAL(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
           .addReg(baseReg)
           .addReg(baseReg)
@@ -346,6 +382,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
+        buildITBlockAL(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addReg(baseReg)
           .addReg(baseReg)
@@ -389,6 +426,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
   if (MI->getNumExplicitOperands() == 5) {
     // STR(register) Encoding T1; no lsl
     // Add up the base and offset registers.
+    buildITBlockAL(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -398,15 +436,17 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
     buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // Restore the base register.
+    buildITBlockAL(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
       .addReg(offsetReg);
   } else {
-
     // STR(registr) Encoding T2; with lsl
     uint8_t imm = MI->getOperand(3).getImm();
     // Add up the base and offset registers (add with lsl).
+    // This will generate an add.w, not adds.w; so we don't need put it inside 
+    // an IT block.
     BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDrs), baseReg)
       .addReg(baseReg).addReg(offsetReg)
       .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm))
@@ -601,6 +641,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg)
           .addImm(numOfReg);
       } else {
+        buildITBlockAL(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addDef(ARM::CPSR, RegState::Dead)
           .addUse(baseReg)
@@ -615,6 +656,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
         .addReg(baseReg)
         .addImm(numOfReg);
     } else {
+      buildITBlockAL(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
         .addDef(ARM::CPSR, RegState::Dead)
         .addUse(baseReg)
@@ -633,6 +675,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg)
           .addImm(numOfReg);
       } else {
+        buildITBlockAL(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addDef(ARM::CPSR, RegState::Dead)
           .addUse(baseReg)
@@ -976,6 +1019,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::VSTRS:
         case ARM::VSTRD:
 #if 1
+          printOperands(MI);
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
@@ -1000,8 +1044,10 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Push is a special case of STM.
         case ARM::tPUSH:            // A7.7.99 Encoding T1;
         case ARM::t2STMDB_UPD:      // A7.7.99 Encoding T2; 
+#if 1
           convertPUSH(MBB, &MI, DL, TII);
           originalStores.push_back(&MI);
+#endif
           break;
 
         // Store multiple FP registers.
