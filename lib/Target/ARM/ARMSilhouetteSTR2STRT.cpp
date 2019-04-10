@@ -499,7 +499,6 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
   unsigned newOpcode = ARM::t2STRT;
   unsigned R0 = ARM::R0, R1 = ARM::R1, SP = ARM::SP;
-  unsigned baseRegNum = baseReg - R0; 
 
   if (isSinglePrecision) {
     // store a single-precision register 
@@ -508,10 +507,7 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     // There is a potential pitfall here: we cannot pick the base register 
     // otherwise it'd destroy the destination address to store.
     //
-    // Here we use a O(1) algorithm rather than a O(n) one. 
-    // (n == GP_REGULAR_REG_NUM) This may not be faster than the O(n) one 
-    // in practice, but it's definitely cooler. :-)    -Jie
-    unsigned interimReg = baseReg == SP ? R0 : (baseRegNum  + 1) % GP_REGULAR_REG_NUM + R0;
+    unsigned interimReg = baseReg == R0 ? R1 : R0;
     
     // Second, store the selected register onto the stack.
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
