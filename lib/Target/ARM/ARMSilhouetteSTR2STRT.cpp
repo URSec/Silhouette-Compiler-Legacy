@@ -31,7 +31,15 @@ using namespace llvm;
 // number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
 #define GP_REGULAR_REG_NUM 13  
 
+// Revert the least significant bit (LSB) of the firstcond of an IT instruction.
+#define invertLSB(num) (num ^ 0x00000001)
+
 char ARMSilhouetteSTR2STRT::ID = 0;
+
+
+static DebugLoc DL;
+// condition store instructions that are within an IT block.
+std::map<MachineInstr *, MachineInstr *> storesIT;
 
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
   return;
@@ -42,8 +50,12 @@ StringRef ARMSilhouetteSTR2STRT::getPassName() const {
 }
 
 
-// function declration
+// function declrations
 static void printOperands(MachineInstr &MI);
+static void splitITBlockWithSTR(MachineInstr &MI);
+static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
+                        DebugLoc &DL, const TargetInstrInfo *TII,
+                        unsigned condCode = ARMCC::AL);
 
 
 // 
@@ -121,6 +133,113 @@ static unsigned getNewOpcode(unsigned opcode) {
 
 
 //
+// Function splitITBlockWithSTR()
+//
+// Description:
+//   This function splits an IT block into several ones if it has at least one
+//   store instruction and has at least two instructions in it. It inserts an IT 
+//   instruction for each of the instruction inside the IT block and removes the 
+//   original IT instruction.
+//  
+// Reasons for this function:
+//   There are some store instructions that are within an IT block. The
+//   transformation of these instructions may add extra instructions, such as a 
+//   pair of add and sub intructions; those added instructions should all be 
+//   conditionally executed as directed by the IT instruction. Besides, the 
+//   added instructions could affect other condtion instructions in the same 
+//   IT block if there are at least two instructions in it: other intructions 
+//   may get squeezed outside the IT block by the newly added instructions.
+//
+//   Sepaprating all the instructions and their corresponding IT instruction
+//   makes the implementation of the store transformation clearer.
+//
+// For more details about the IT instruction, see section A7.7.37 of the 
+// ARMv7-M manual.
+//
+// Inputs:
+//   MF - The Machine Function on which this pass runs.
+//
+// Outputs:
+//   A sequence of <IT, none-IT> instructions pairs. 
+//
+static void splitITBlockWithSTR(MachineFunction &MF) {
+  const ARMBaseInstrInfo *ABII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
+
+  for (MachineBasicBlock &MBB : MF) {
+    // We need delete the original IT if more IT instructions are generated.
+    std::vector<MachineInstr *> ITInstrs; 
+    for (MachineInstr &MI : MBB) {
+      if (MI.getOpcode() == ARM::t2IT) {
+        // number of conditional instructions in the IT block
+        unsigned numOfCondInstr = 1;  
+
+#if 0
+        errs() << "Found an IT block in function: " << MF.getName() << "\n";
+        MI.dump();
+#endif
+        
+        unsigned firstcond = MI.getOperand(0).getImm();
+        unsigned mask = MI.getOperand(1).getImm() & 0x0000000f;
+        // Find how many succeeding instructions are controlled by this IT.
+        if (mask & 0x00000001) {
+          numOfCondInstr = 4;
+        } else if (mask & 0x00000002) {
+          numOfCondInstr = 3;
+        } else if (mask & 0x00000004) {
+          numOfCondInstr = 2;
+        } else {
+          numOfCondInstr = 1;
+          // If there is only one instruction in the IT block, we don't need to
+          // do any spliting.
+          continue;
+        }
+
+        // Check if there is at least one store instruction.
+        MachineInstr *currMI = &MI;
+        bool hasStore = false;
+        for (unsigned i = 0; i < numOfCondInstr; i++) {
+          assert(currMI != NULL && "getNextNode() returns a NULL!\n");
+
+          currMI = currMI->getNextNode();
+          if (currMI->mayStore()) {
+            hasStore = true;
+            storesIT.insert(std::pair<MachineInstr *, MachineInstr *>(currMI, &MI));
+          }
+        }
+        // If there is no store in the IT block, we don't need to split it.
+        if (hasStore == false) continue;
+
+        // Start to split the IT block if it has more than one instructions.
+        //
+        // Seprate the first condtion instruction.
+        ITInstrs.push_back(&MI);
+        currMI = MI.getNextNode();
+        buildITInstr(MBB, currMI, DL, ABII, firstcond);
+
+        unsigned firstcondLSB = firstcond & 0x00000001;
+        unsigned firstcondLSBInverted = invertLSB(firstcond);
+
+        numOfCondInstr--;
+        for (unsigned i = 3; numOfCondInstr > 0; numOfCondInstr--, i--) {
+          currMI = currMI->getNextNode();
+          if (firstcondLSB == ((mask & (1u << i)) >> i)) {
+            buildITInstr(MBB, currMI, DL, ABII, firstcond);
+          } else {
+            buildITInstr(MBB, currMI, DL, ABII, firstcondLSBInverted);
+          }
+        }
+      }
+    }
+    
+    // Delete the original IT.
+    for (MachineInstr *MI : ITInstrs) {
+      MI->eraseFromParent();
+    }
+  }
+}
+
+
+//
 // Method: buildUnprivStr
 //
 // Description:
@@ -177,29 +296,33 @@ static void buildUnprivStr(MachineBasicBlock &MBB,
 
 
 //
-// Function: buildITBlockAL()
+// Function: buildITInstr()
 //
 // Description:
-//   This function inserts an IT instruction (A7.7.37) with ARMCC::AL (always 
-//   execute) as the condition code before an added instruction (usually tADDi8 
-//   and tSUBi8) that would update the processor status flags if they are 
-//   outside of an IT block. This function ensures that the generated new 
-//   instruction would not update the status flags; otherwise the sementics of 
-//   the program may get accidentally broken.
+//   This function inserts an IT instruction (A7.7.37) with an condition code
+//   specified in the argument list. This inserted IT instruction will only 
+//   manage the following one instruction.
+//
+//   If a newly added store instruction comes with auxiliary instructions that 
+//   that would update the processor status flags if they are outside of an IT 
+//   block, we need use ARMCC::AL as the condition code for this IT; otherwise 
+//   the sementics of the program may get accidentally broken.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
 //   MI - The MachineInstr before which to insert the the new unprivileged store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
+//   condCode - firstcond of the created IT.
 //   
 // Outputs:
-//   An IT instruction with ARMCC::Al as the firstcond and 8 as the mask.
+//   An IT instruction with condcode as the firstcond and 8 as the mask.
 //
-static void buildITBlockAL(MachineBasicBlock &MBB, MachineInstr *MI,
-                        DebugLoc &DL, const TargetInstrInfo *TII) {
+static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
+                        DebugLoc &DL, const TargetInstrInfo *TII,
+                        unsigned condCode) {
   BuildMI(MBB, MI, DL, TII->get(ARM::t2IT))
-    .addImm(ARMCC::AL) // always execute next instruction.
+    .addImm(condCode) // always execute next instruction.
     // 8 as the mask means this IT only manages the next one instruction.
     // See A7.7.37 for more details about the mask.
     .addImm(8); 
@@ -242,7 +365,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
   // the new str, and restore the base registr.
   if (imm < 0) {
     // This sub will update the status flags; we need put it in a IT block.
-    buildITBlockAL(MBB, MI, DL, TII);
+    buildITInstr(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -252,7 +375,7 @@ void convertSTRimm(MachineBasicBlock &MBB,
     buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // restore the base register
-    buildITBlockAL(MBB, MI, DL, TII);
+    buildITInstr(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -327,7 +450,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
-        buildITBlockAL(MBB, MI, DL, TII);
+        buildITInstr(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8))
           .addReg(baseReg)
           .addReg(baseReg)
@@ -343,7 +466,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
-        buildITBlockAL(MBB, MI, DL, TII);
+        buildITInstr(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addReg(baseReg)
           .addReg(baseReg)
@@ -369,7 +492,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
-        buildITBlockAL(MBB, MI, DL, TII);
+        buildITInstr(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
           .addReg(baseReg)
           .addReg(baseReg)
@@ -382,7 +505,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
           .addReg(baseReg)
           .addImm(imm);
       } else {
-        buildITBlockAL(MBB, MI, DL, TII);
+        buildITInstr(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addReg(baseReg)
           .addReg(baseReg)
@@ -426,7 +549,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
   if (MI->getNumExplicitOperands() == 5) {
     // STR(register) Encoding T1; no lsl
     // Add up the base and offset registers.
-    buildITBlockAL(MBB, MI, DL, TII);
+    buildITInstr(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -436,7 +559,7 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
     buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
 
     // Restore the base register.
-    buildITBlockAL(MBB, MI, DL, TII);
+    buildITInstr(MBB, MI, DL, TII);
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
       .addReg(baseReg)
       .addReg(baseReg)
@@ -637,7 +760,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg)
           .addImm(numOfReg);
       } else {
-        buildITBlockAL(MBB, MI, DL, TII);
+        buildITInstr(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addDef(ARM::CPSR, RegState::Dead)
           .addUse(baseReg)
@@ -652,7 +775,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
         .addReg(baseReg)
         .addImm(numOfReg);
     } else {
-      buildITBlockAL(MBB, MI, DL, TII);
+      buildITInstr(MBB, MI, DL, TII);
       BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
         .addDef(ARM::CPSR, RegState::Dead)
         .addUse(baseReg)
@@ -671,7 +794,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg)
           .addImm(numOfReg);
       } else {
-        buildITBlockAL(MBB, MI, DL, TII);
+        buildITInstr(MBB, MI, DL, TII);
         BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
           .addDef(ARM::CPSR, RegState::Dead)
           .addUse(baseReg)
@@ -904,6 +1027,9 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   unsigned codeSize = getFuncCodeSize(MF); 
   unsigned codeSizeNew = 0;
 
+  // Split an IT block if it has at least one store instruction.
+  splitITBlockWithSTR(MF);
+
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
   DebugLoc DL;
 
@@ -935,7 +1061,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRBi:     // A7.7.160 Encoding T1
         case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
         case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -962,7 +1088,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store byte; A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
         case ARM::t2STRB_PRE:   // pre-indexed store
         case ARM::t2STRB_POST:  // post-index store
-#if 1
+#if 0
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
@@ -981,7 +1107,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store register byte; A7.7.161
         case ARM::tSTRBr:  // Encoding T1: STRB<c> <Rt>,[<Rn>,<Rm>]
         case ARM::t2STRBs: // Encoding T2: STRB<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           offsetReg = MI.getOperand(2).getReg();
@@ -992,7 +1118,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         // STRD (immediate); A7.7.163; Encoding T1
         case ARM::t2STRDi8:  // no write back
-#if 1
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           sourceReg2 = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(2).getReg();
@@ -1014,8 +1140,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Floating stores.
         case ARM::VSTRS:
         case ARM::VSTRD:
-#if 1
-          printOperands(MI);
+#if 0
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
@@ -1029,7 +1154,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::t2STMIA:      // A7.7.156 Encoding T2; no write back
         case ARM::t2STMIA_UPD:  // A7.7.156 Encoding T2; with write back
         case ARM::t2STMDB:      // A7.7.157 Encoding T1; no write back
-#if 1
+#if 0
           baseReg = MI.getOperand(0).getReg();
           convertSTM(MBB, &MI, baseReg, DL, TII);
           originalStores.push_back(&MI);
@@ -1040,7 +1165,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Push is a special case of STM.
         case ARM::tPUSH:            // A7.7.99 Encoding T1;
         case ARM::t2STMDB_UPD:      // A7.7.99 Encoding T2; 
-#if 1
+#if 0
           convertPUSH(MBB, &MI, DL, TII);
           originalStores.push_back(&MI);
 #endif
@@ -1051,7 +1176,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // generate VSTM. VSTMDDB_UPD and VSTMSDB_UPD are aliases for vpush. 
         case ARM::VSTMDDB_UPD:  // VPUSH double-precision registers
         case ARM::VSTMSDB_UPD:  // VPUSH single-precision registers
-#if 1
+#if 0
           convertVPUSH(MBB, &MI, opcode == ARM::VSTMSDB_UPD, DL, TII);
           originalStores.push_back(&MI);
 #endif
