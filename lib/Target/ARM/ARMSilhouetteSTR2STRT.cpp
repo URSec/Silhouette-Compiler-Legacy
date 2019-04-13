@@ -246,8 +246,8 @@ static void splitITBlockWithSTR(MachineFunction &MF) {
 //   This method builds an unprivileged store instruction.
 //   Unprivileged load/store instructions only support 8-bit immediate, ranging
 //   from 0 to 255; but a normal store can have an immediate as large as 1023.
-//   For an immediate greater than 255, we need to use extra add and sub 
-//   instructions. See the code for details.
+//   For a negative immediate or one that is greater than 255, it's already
+//   handled in the convertSTRimm() function.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
@@ -270,28 +270,10 @@ static void buildUnprivStr(MachineBasicBlock &MBB,
                       unsigned newOpcode,
                       DebugLoc &DL,
                       const TargetInstrInfo *TII) {
-  if (imm <= 255) {
-    // If the imm is less than 256, then just create an unprivileged store.
-    BuildMI(MBB, MI, DL, TII->get(newOpcode))
+  BuildMI(MBB, MI, DL, TII->get(newOpcode))
       .addReg(sourceReg)
       .addReg(baseReg)
       .addImm(imm);
-  } else {
-      // If the imm is greater than 255, we need to add the imm to the base 
-      // register first, create an unprivileged store, and then restore the 
-      // base register.
-      BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
-        .addReg(baseReg)
-        .addImm(imm)
-        .addImm(ARMCC::AL).addReg(0);
-
-      buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
-
-      BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
-        .addReg(baseReg)
-        .addImm(imm)
-        .addImm(ARMCC::AL).addReg(0);
-  }
 }
 
 
@@ -381,7 +363,24 @@ void convertSTRimm(MachineBasicBlock &MBB,
       .addReg(baseReg)
       .addImm(-imm);
   } else {
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+    if (imm > 255) {
+      // If the imm is greater than 255, we need to add the imm to the base 
+      // register first, create an unprivileged store, and then restore the 
+      // base register.
+      BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
+        .addReg(baseReg)
+        .addImm(imm)
+        .addImm(ARMCC::AL).addReg(0);
+
+      buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
+
+      BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
+        .addReg(baseReg)
+        .addImm(imm)
+        .addImm(ARMCC::AL).addReg(0);
+    } else {
+      buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+    }
   }
 }
 
@@ -1061,7 +1060,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRBi:     // A7.7.160 Encoding T1
         case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
         case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
-#if 0
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
@@ -1088,7 +1087,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store byte; A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
         case ARM::t2STRB_PRE:   // pre-indexed store
         case ARM::t2STRB_POST:  // post-index store
-#if 0
+#if 1
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
@@ -1107,7 +1106,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store register byte; A7.7.161
         case ARM::tSTRBr:  // Encoding T1: STRB<c> <Rt>,[<Rn>,<Rm>]
         case ARM::t2STRBs: // Encoding T2: STRB<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-#if 0
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           offsetReg = MI.getOperand(2).getReg();
@@ -1118,7 +1117,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         // STRD (immediate); A7.7.163; Encoding T1
         case ARM::t2STRDi8:  // no write back
-#if 0
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           sourceReg2 = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(2).getReg();
@@ -1140,7 +1139,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Floating stores.
         case ARM::VSTRS:
         case ARM::VSTRD:
-#if 0
+#if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = (MI.getOperand(2).getImm()) << 2;
@@ -1154,7 +1153,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::t2STMIA:      // A7.7.156 Encoding T2; no write back
         case ARM::t2STMIA_UPD:  // A7.7.156 Encoding T2; with write back
         case ARM::t2STMDB:      // A7.7.157 Encoding T1; no write back
-#if 0
+#if 1
           baseReg = MI.getOperand(0).getReg();
           convertSTM(MBB, &MI, baseReg, DL, TII);
           originalStores.push_back(&MI);
@@ -1165,7 +1164,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // Push is a special case of STM.
         case ARM::tPUSH:            // A7.7.99 Encoding T1;
         case ARM::t2STMDB_UPD:      // A7.7.99 Encoding T2; 
-#if 0
+#if 1
           convertPUSH(MBB, &MI, DL, TII);
           originalStores.push_back(&MI);
 #endif
