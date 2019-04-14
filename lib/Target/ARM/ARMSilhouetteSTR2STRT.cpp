@@ -259,17 +259,18 @@ static void splitITBlockWithSTR(MachineFunction &MF) {
 //   A new unprivileged store.
 //
 // Return:
-//   None.
-static void buildUnprivStr(MachineBasicBlock &MBB,
+//   A newly created store instruction.
+//
+static MachineInstr *buildUnprivStr(MachineBasicBlock &MBB,
                       MachineInstr *MI,
                       unsigned sourceReg, unsigned baseReg, uint64_t imm,
                       unsigned newOpcode,
                       DebugLoc &DL,
                       const TargetInstrInfo *TII) {
-  BuildMI(MBB, MI, DL, TII->get(newOpcode))
-      .addReg(sourceReg)
-      .addReg(baseReg)
-      .addImm(imm);
+  return BuildMI(MBB, MI, DL, TII->get(newOpcode))
+          .addReg(sourceReg)
+          .addReg(baseReg)
+          .addImm(imm).operator->();
 }
 
 
@@ -305,7 +306,64 @@ static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
     // See A7.7.37 for more details about the mask.
     .addImm(8); 
 }
-                      
+
+//
+// Function buildADDi8()
+//
+// Description:
+//   This function builds an tADDi8 or tSUBi8 instruction as part of building an
+//   unprivileged store. The reason we need a whole function to build an add/sub
+//   is that tADDi8 and tSUBi8 only supports R0 - R7 as the source/destination
+//   register. Sometimes the base regisger of a store is from R8 - R12; so we 
+//   need to handle this case specially.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   baseReg - The register to build this add/sub.
+//   imm -  The immediate to build the add/sub.
+//   arithOpcode - tADDi8 or tSUBi8
+//   newInstrs - A container of all the newly added instructions for a store.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   A sequence of newly added instructions.
+//
+//
+static void buildtADDi8(MachineBasicBlock &MBB, MachineInstr *MI, 
+                      unsigned baseReg, unsigned imm, unsigned arithOpcode,
+                      std::vector<MachineInstr *> &newInstrs,
+                      const TargetInstrInfo *TII) {
+  if (baseReg <= ARM::R7) {
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(arithOpcode), baseReg)
+        .addReg(baseReg).addReg(baseReg).addImm(imm)
+        .operator->());
+  } else {
+    // If baseReg is greater than R7, we push R0 onto the stack, move baseReg
+    // to R0, update R0, move R0 to baseReg, and then pop R0.
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
+        .addReg(ARM::SP).addReg(1)
+        .operator->());
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, ARM::R0, ARM::SP, 0, ARM::t2STRT, DL, TII));
+    // move from baseReg to R0
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tMOVr), ARM::R0)
+      .addReg(ARM::R0).addReg(baseReg)
+      .operator->());
+    // Do the real add.
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(arithOpcode), ARM::R0)
+      .addReg(ARM::R0).addReg(ARM::R0).addImm(imm)
+      .operator->());
+    // Move the result back to baseReg.
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tMOVr), baseReg)
+      .addReg(baseReg).addReg(ARM::R0)
+      .operator->());
+    // Restore R0.
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP), ARM::R0)
+      .addImm(ARMCC::AL).addReg(0).addReg(ARM::R0)
+      .operator->());
+  }                     
+}
 
 //
 // Method: convertSTRimm()
