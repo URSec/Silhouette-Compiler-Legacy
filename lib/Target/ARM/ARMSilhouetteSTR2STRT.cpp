@@ -36,10 +36,7 @@ using namespace llvm;
 
 char ARMSilhouetteSTR2STRT::ID = 0;
 
-
 static DebugLoc DL;
-// condition store instructions that are within an IT block.
-std::map<MachineInstr *, MachineInstr *> storesIT;
 
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
   return;
@@ -52,7 +49,7 @@ StringRef ARMSilhouetteSTR2STRT::getPassName() const {
 
 // function declrations
 static void printOperands(MachineInstr &MI);
-static void splitITBlockWithSTR(MachineInstr &MI);
+static void splitITBlockWithSTR(MachineFunction &MF);
 static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
                         DebugLoc &DL, const TargetInstrInfo *TII,
                         unsigned condCode = ARMCC::AL);
@@ -203,7 +200,6 @@ static void splitITBlockWithSTR(MachineFunction &MF) {
           currMI = currMI->getNextNode();
           if (currMI->mayStore()) {
             hasStore = true;
-            storesIT.insert(std::pair<MachineInstr *, MachineInstr *>(currMI, &MI));
           }
         }
         // If there is no store in the IT block, we don't need to split it.
@@ -1175,7 +1171,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // generate VSTM. VSTMDDB_UPD and VSTMSDB_UPD are aliases for vpush. 
         case ARM::VSTMDDB_UPD:  // VPUSH double-precision registers
         case ARM::VSTMSDB_UPD:  // VPUSH single-precision registers
-#if 0
+#if 1
           convertVPUSH(MBB, &MI, opcode == ARM::VSTMSDB_UPD, DL, TII);
           originalStores.push_back(&MI);
 #endif
