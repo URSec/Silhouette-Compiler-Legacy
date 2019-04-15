@@ -513,13 +513,13 @@ void convertSTRimm(MachineBasicBlock &MBB,
 // Return:
 //   None.
 //
-void convertSTRimmIndexed(MachineBasicBlock &MBB,
-                          MachineInstr *MI,
+void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
                           unsigned sourceReg, unsigned baseReg, int64_t imm,
                           bool preIndex,
                           unsigned newOpcode,
-                          DebugLoc &DL,
-                          const TargetInstrInfo *TII) {
+                          DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+
   if (preIndex == true) {
     // This is a pre-indexed store.
     // First, update the base register.
@@ -529,76 +529,62 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB,
         // in the comment of this function.
 
         // For SUB (SP minus imm), imm = ZeroExtend(imm7:'00', 32)
-        assert((-imm) % 4 == 0 && "IMM is not a multiple of 4");
+        assert((-imm) % 4 == 0 && "IMM is not a multiple of 4.");
 
         imm = (-imm) >> 2;
-        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
-          .addReg(baseReg)
-          .addImm(imm);
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .operator->());
       } else {
-        buildITInstr(MBB, MI, DL, TII);
-        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8))
-          .addReg(baseReg)
-          .addReg(baseReg)
-          .addImm(-imm);
+        buildtADDi8(MBB, MI, baseReg, -imm, false, newInstrs, TII);
       }
     } else {
       // imm >= 0.
       if (baseReg == ARM::SP) {
         // For ADD (SP plus imm), imm = ZeroExtend(imm7:'00', 32)
-        assert(imm % 4 == 0 && "IMM is not a multiple of 4");
+        assert(imm % 4 == 0 && "IMM is not a multiple of 4.");
         imm >>= 2;
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
-          .addReg(baseReg)
-          .addImm(imm);
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .operator->());
       } else {
-        buildITInstr(MBB, MI, DL, TII);
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
-          .addReg(baseReg)
-          .addReg(baseReg)
-          .addImm(imm);
+        buildtADDi8(MBB, MI, baseReg, imm, true, newInstrs, TII);
       }
     }
 
     // Second, build a new store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
-
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
   } else {
     // This is a post-indexed store.
     // First, build a new store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
 
     // Second, update the imm to the base register
     if (imm < 0) {
       if (baseReg == ARM::SP) {
-        assert((-imm) % 4 == 0 && "IMM is not a multiple of 4");
-        
+        assert((-imm) % 4 == 0 && "IMM is not a multiple of 4.");
         imm = (-imm) >> 2;
-        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
-          .addReg(baseReg)
-          .addImm(imm);
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .operator->());
       } else {
-        buildITInstr(MBB, MI, DL, TII);
-        BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
-          .addReg(baseReg)
-          .addReg(baseReg)
-          .addImm(-imm);
+        buildtADDi8(MBB, MI, baseReg, -imm, false, newInstrs, TII);
       }
     } else {
       if (baseReg == ARM::SP) {
-        assert(imm % 4 == 0 && "IMM is not a multiple of 4");
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
-          .addReg(baseReg)
-          .addImm(imm);
+        assert(imm % 4 == 0 && "IMM is not a multiple of 4.");
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .operator->());
       } else {
-        buildITInstr(MBB, MI, DL, TII);
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
-          .addReg(baseReg)
-          .addReg(baseReg)
-          .addImm(imm);
+        buildtADDi8(MBB, MI, baseReg, imm, true, newInstrs, TII);
       }
     }
   }
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
