@@ -715,8 +715,8 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
 
     // Third, move from FP register to the general-purpose register.
     BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), interimReg)
-      .addReg(interimReg)
-      .addReg(sourceReg);
+      .addReg(sourceReg)
+      .addImm(ARMCC::AL).addReg(0);  // pred:14, pred:%noreg
 
     // Forth, create an unprivileged store.
     convertSTRimm(MBB, MI, interimReg, baseReg, imm, newOpcode, DL, TII);
