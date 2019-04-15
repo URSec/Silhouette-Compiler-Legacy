@@ -38,6 +38,13 @@ char ARMSilhouetteSTR2STRT::ID = 0;
 
 static DebugLoc DL;
 
+// Instructions that update the process stus flags.
+std::set<unsigned> flagUpdateInstrs {
+  ARM::tSUBi8, ARM::tADDi8,
+  ARM::tADDrr, ARM::tSUBrr
+};
+ 
+
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT() : MachineFunctionPass(ID) {
   return;
 }
@@ -218,11 +225,9 @@ static void splitITBlockWithSTR(MachineFunction &MF) {
         numOfCondInstr--;
         for (unsigned i = 3; numOfCondInstr > 0; numOfCondInstr--, i--) {
           currMI = currMI->getNextNode();
-          if (firstcondLSB == ((mask & (1u << i)) >> i)) {
-            buildITInstr(MBB, currMI, DL, ABII, firstcond);
-          } else {
-            buildITInstr(MBB, currMI, DL, ABII, firstcondLSBInverted);
-          }
+          unsigned CC = (firstcondLSB == ((mask & (1u << i)) >> i)) ? 
+            firstcond : firstcondLSBInverted;
+          buildITInstr(MBB, currMI, DL, ABII, CC);
         }
       }
     }
@@ -307,6 +312,51 @@ static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
     .addImm(8); 
 }
 
+
+// 
+// Function: insertITInstrIfNeeded()
+//
+// Description:
+//   This function inserts IT instructions for each newly added instruction 
+//   introduced by store transformation if that store is inside an IT block,
+//   or if the added instruction changes the status flags when it is outside an
+//   IT block.
+//
+// Inputs:
+//   newInstrs - All newly added instructions for a store convertion.
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   store - The store instruction that was just got converted.   
+//   TII - A pointer to the TargetInstrInfo structure.
+// 
+// Outputs:
+//   0 or more IT instruction.
+//
+static void insertITInstrIfNeeded(std::vector<MachineInstr *> &newInstrs,
+                                 MachineBasicBlock &MBB, MachineInstr *store,
+                                 const TargetInstrInfo *TII) {
+  unsigned numOfNewInstrs = newInstrs.size();
+
+  // No need to add an IT if the intrumentation of this store does not introduce
+  // extra auxiliary instructions.
+  if (numOfNewInstrs == 1) return;
+
+  MachineInstr *prevMI = newInstrs[0]->getPrevNode();
+  if (prevMI != NULL && prevMI->getOpcode() == ARM::t2IT) {
+    // Start to insert from the second instruction.
+    for (unsigned i = 1; i < numOfNewInstrs; i++) {
+      buildITInstr(MBB, newInstrs[i], DL, TII, prevMI->getOperand(0).getImm());
+    }
+  } else {
+    // The store is not inside an IT block.
+    for (MachineInstr *newMI : newInstrs) {
+      if (flagUpdateInstrs.find(newMI->getOpcode()) != flagUpdateInstrs.end()) {
+        buildITInstr(MBB, newMI, DL, TII);
+      }
+    }
+  }
+}
+
+
 //
 // Function buildADDi8()
 //
@@ -314,8 +364,8 @@ static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
 //   This function builds an tADDi8 or tSUBi8 instruction as part of building an
 //   unprivileged store. The reason we need a whole function to build an add/sub
 //   is that tADDi8 and tSUBi8 only supports R0 - R7 as the source/destination
-//   register. Sometimes the base regisger of a store is from R8 - R12; so we 
-//   need to handle this case specially.
+//   register. Sometimes the base regisger of a store is from R8 - R12, and we 
+//   need use t2ADDri12 for it.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
@@ -329,39 +379,22 @@ static void buildITInstr(MachineBasicBlock &MBB, MachineInstr *MI,
 // Outputs:
 //   A sequence of newly added instructions.
 //
-//
 static void buildtADDi8(MachineBasicBlock &MBB, MachineInstr *MI, 
-                      unsigned baseReg, unsigned imm, unsigned arithOpcode,
+                      unsigned baseReg, unsigned imm, bool isAdd,
                       std::vector<MachineInstr *> &newInstrs,
                       const TargetInstrInfo *TII) {
+  unsigned opcode;
   if (baseReg <= ARM::R7) {
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(arithOpcode), baseReg)
+    opcode = isAdd ? ARM::tADDi8 : ARM::tSUBi8;
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), baseReg)
         .addReg(baseReg).addReg(baseReg).addImm(imm)
         .operator->());
   } else {
-    // If baseReg is greater than R7, we push R0 onto the stack, move baseReg
-    // to R0, update R0, move R0 to baseReg, and then pop R0.
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
-        .addReg(ARM::SP).addReg(1)
-        .operator->());
-    newInstrs.push_back(
-        buildUnprivStr(MBB, MI, ARM::R0, ARM::SP, 0, ARM::t2STRT, DL, TII));
-    // move from baseReg to R0
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tMOVr), ARM::R0)
-      .addReg(ARM::R0).addReg(baseReg)
-      .operator->());
-    // Do the real add.
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(arithOpcode), ARM::R0)
-      .addReg(ARM::R0).addReg(ARM::R0).addImm(imm)
-      .operator->());
-    // Move the result back to baseReg.
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tMOVr), baseReg)
-      .addReg(baseReg).addReg(ARM::R0)
-      .operator->());
-    // Restore R0.
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP), ARM::R0)
-      .addImm(ARMCC::AL).addReg(0).addReg(ARM::R0)
-      .operator->());
+    opcode = isAdd ? ARM::t2ADDri12 : ARM::t2SUBri12;
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .addImm(ARMCC::AL).addReg(0)
+          .operator->());
   }                     
 }
 
@@ -396,46 +429,46 @@ void convertSTRimm(MachineBasicBlock &MBB,
                      unsigned newOpcode,
                      DebugLoc &DL,
                      const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+
   // Unprivileged stores only support positive imm. If imm is a negative, then 
   // we need to sub this imm to the base register, give 0 to the imm field of 
   // the new str, and restore the base registr.
   if (imm < 0) {
     // This sub will update the status flags; we need put it in a IT block.
-    buildITInstr(MBB, MI, DL, TII);
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
-      .addReg(baseReg)
-      .addReg(baseReg)
-      .addImm(-imm);
+    buildtADDi8(MBB, MI, baseReg, -imm, false, newInstrs, TII);
     
     // insert a new unprivileged store
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
 
     // restore the base register
-    buildITInstr(MBB, MI, DL, TII);
-    BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
-      .addReg(baseReg)
-      .addReg(baseReg)
-      .addImm(-imm);
+    buildtADDi8(MBB, MI, baseReg, -imm, true, newInstrs, TII);
   } else {
     if (imm > 255) {
       // If the imm is greater than 255, we need to add the imm to the base 
       // register first, create an unprivileged store, and then restore the 
       // base register.
-      BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
-        .addReg(baseReg)
-        .addImm(imm)
-        .addImm(ARMCC::AL).addReg(0);
+      newInstrs.push_back(
+          BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .addImm(ARMCC::AL).addReg(0)
+          .operator->());
 
-      buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
+      newInstrs.push_back(
+          buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
 
-      BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
-        .addReg(baseReg)
-        .addImm(imm)
-        .addImm(ARMCC::AL).addReg(0);
+      newInstrs.push_back(
+          BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
+          .addReg(baseReg).addImm(imm)
+          .addImm(ARMCC::AL).addReg(0)
+          .operator->());
     } else {
-      buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+      newInstrs.push_back(
+          buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII));
     }
   }
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
@@ -688,7 +721,7 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     // Second, store the selected register onto the stack.
     BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
       .addReg(SP)
-      .addReg(1);
+      .addImm(1);
     buildUnprivStr(MBB, MI, interimReg, SP, 0, ARM::t2STRT, DL, TII);
 
     // Don't forget this.
@@ -1126,6 +1159,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
             // The imm of this store = ZeroExtend(imm5:'0',32).
             imm <<= 1;
           }
+          /* errs() << "imm = " << imm << "\n"; */
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
