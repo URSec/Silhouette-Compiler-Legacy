@@ -761,7 +761,7 @@ static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
     newInstrs.push_back(
         buildUnprivStr(MBB, MI, interimReg0, SP, 0, ARM::t2STRT, DL, TII));
     newInstrs.push_back(
-        buildUnprivStr(MBB, MI, interimReg0, SP, 4, ARM::t2STRT, DL, TII));
+        buildUnprivStr(MBB, MI, interimReg1, SP, 4, ARM::t2STRT, DL, TII));
 
     // Don't forget this.
     if (baseReg == ARM::SP) imm += 8;
