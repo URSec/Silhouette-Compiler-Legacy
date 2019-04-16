@@ -693,10 +693,12 @@ void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 // Outputs:
 //   One or more unprivileged stores, one extra push, and one extra pop.
 //
-void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
-                 unsigned sourceReg, unsigned baseReg, uint16_t imm,
-                 bool isSinglePrecision,
-                 DebugLoc &DL, const TargetInstrInfo *TII) {
+static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
+                           MachineInstr *MI,
+                           unsigned sourceReg, unsigned baseReg, uint16_t imm,
+                           bool isSinglePrecision,
+                           DebugLoc &DL, const TargetInstrInfo *TII,
+                           bool calledByOtherConverter = false) {
   unsigned newOpcode = ARM::t2STRT;
   unsigned R0 = ARM::R0, R1 = ARM::R1, SP = ARM::SP;
 
@@ -785,7 +787,13 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
       .addReg(interimReg0).addReg(interimReg1)
       .operator->());
   } 
-  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+
+  if (calledByOtherConverter == true) {
+    return newInstrs;
+  } else {
+    insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+    return std::vector<MachineInstr *>();
+  }
 }
 
 
@@ -965,6 +973,8 @@ static void convertPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
 static void convertVPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
                  bool isSinglePrecision,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+  std::vector<MachineInstr *> newInstrsVSTR;
 
   unsigned SP = ARM::SP;
   // Get the register list.
@@ -977,23 +987,27 @@ static void convertVPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
   // Store multiple floating-point registers.
   if (isSinglePrecision) {
     // Update SP. 
-    // A VPUSH stores registersfrom the lower address to higher address.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP)
-      .addImm(numOfReg);
+    // A VPUSH stores registers from the lower address to higher address.
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP).addImm(numOfReg)
+      .operator->());
 
     // Store all registers.
     for (unsigned i = 0; i < numOfReg; i++) {
-      convertVSTR(MBB, MI, regList[i], SP, i * 4, true, DL, TII);
+      newInstrsVSTR = convertVSTR(MBB, MI, regList[i], SP, i * 4, true, DL, TII, true);
+      newInstrs.insert(newInstrs.end(), newInstrsVSTR.begin(), newInstrsVSTR.end());
     }
   } else {
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP)
-      .addImm(numOfReg * 2);
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP).addImm(numOfReg * 2)
+      .operator->());
     for (unsigned i = 0; i < numOfReg; i++) {
-      convertVSTR(MBB, MI, regList[i], SP, i * 8, false, DL, TII);
+      newInstrsVSTR = convertVSTR(MBB, MI, regList[i], SP, i * 8, false, DL, TII, true);
+      newInstrs.insert(newInstrs.end(), newInstrsVSTR.begin(), newInstrsVSTR.end());
     }
   }
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 
   // TO-DO: there is an optimization we can do here. 
   // When storing multiple FP registers to consecutive memory addresses, for 
@@ -1166,7 +1180,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
             // The imm of this store = ZeroExtend(imm5:'0',32).
             imm <<= 1;
           }
-          /* errs() << "imm = " << imm << "\n"; */
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
