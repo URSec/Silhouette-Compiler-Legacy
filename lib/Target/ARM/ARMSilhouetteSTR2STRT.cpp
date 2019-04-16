@@ -416,6 +416,8 @@ static void buildtADDi8(MachineBasicBlock &MBB, MachineInstr *MI,
 //   newOpcode - The opcode of the unprivileged store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
+//   calledByOtherConverter - Whether this function is called by another store
+//   conversion function.
 //
 // Outputs:
 //   A new unprivileged store.
@@ -423,12 +425,12 @@ static void buildtADDi8(MachineBasicBlock &MBB, MachineInstr *MI,
 // Return:
 //   None.
 //
-void convertSTRimm(MachineBasicBlock &MBB,
-                     MachineInstr *MI,
-                     unsigned sourceReg, unsigned baseReg, int64_t imm,
-                     unsigned newOpcode,
-                     DebugLoc &DL,
-                     const TargetInstrInfo *TII) {
+static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
+                       MachineInstr *MI,
+                       unsigned sourceReg, unsigned baseReg, int64_t imm,
+                       unsigned newOpcode, 
+                       DebugLoc &DL, const TargetInstrInfo *TII,
+                       bool calledByOtherConverter = false) {
   std::vector<MachineInstr *> newInstrs;
 
   // Unprivileged stores only support positive imm. If imm is a negative, then 
@@ -468,7 +470,11 @@ void convertSTRimm(MachineBasicBlock &MBB,
           buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII));
     }
   }
-  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+  if (calledByOtherConverter) {
+    return newInstrs;
+  } else {
+    insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+  }
 }
 
 
@@ -583,7 +589,6 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
       }
     }
   }
-
   insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
@@ -695,6 +700,8 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
   unsigned newOpcode = ARM::t2STRT;
   unsigned R0 = ARM::R0, R1 = ARM::R1, SP = ARM::SP;
 
+  std::vector<MachineInstr *> newInstrs;
+
   if (isSinglePrecision) {
     // store a single-precision register 
     
@@ -705,26 +712,31 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     unsigned interimReg = baseReg == R0 ? R1 : R0;
     
     // Second, store the selected register onto the stack.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP)
-      .addImm(1);
-    buildUnprivStr(MBB, MI, interimReg, SP, 0, ARM::t2STRT, DL, TII);
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP).addImm(1)
+      .operator->());
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, interimReg, SP, 0, ARM::t2STRT, DL, TII));
 
     // Don't forget this.
     if (baseReg == SP) imm += 4;
 
     // Third, move from FP register to the general-purpose register.
-    BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), interimReg)
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRS), interimReg)
       .addReg(sourceReg)
-      .addImm(ARMCC::AL).addReg(0);  // pred:14, pred:%noreg
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .operator->());
 
-    // Forth, create an unprivileged store.
-    convertSTRimm(MBB, MI, interimReg, baseReg, imm, newOpcode, DL, TII);
+    // Forth, create an unprivileged store. 
+    std::vector<MachineInstr *> newInstrsSTRImm = 
+      convertSTRimm(MBB, MI, interimReg, baseReg, imm, newOpcode, DL, TII, true);
+    newInstrs.insert(newInstrs.end(), newInstrsSTRImm.begin(), newInstrsSTRImm.end());
 
     // Finally, restore the general-purpose register.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
       .addImm(ARMCC::AL).addReg(0)
-      .addReg(interimReg);
+      .addReg(interimReg)
+      .operator->());
   } else {
     // store a double-precision register (two single-precision registers)
     
@@ -741,30 +753,39 @@ void convertVSTR(MachineBasicBlock &MBB, MachineInstr *MI,
     }
 
     // Second, store the two selected registers onto the stack.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP)
-      .addImm(2);
-    buildUnprivStr(MBB, MI, interimReg0, SP, 0, ARM::t2STRT, DL, TII);
-    buildUnprivStr(MBB, MI, interimReg1, SP, 4, ARM::t2STRT, DL, TII);
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+      .addReg(SP).addImm(2)
+      .operator->());
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, interimReg0, SP, 0, ARM::t2STRT, DL, TII));
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, interimReg0, SP, 4, ARM::t2STRT, DL, TII));
 
     // Don't forget this.
     if (baseReg == ARM::SP) imm += 8;
 
     // Third, move the double word to the two general-purpose registers.
-    BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRRD))
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::VMOVRRD))
       .addReg(interimReg0).addReg(interimReg1)
       .addReg(sourceReg)
-      .addImm(ARMCC::AL).addReg(0);  // pred:14, pred:%noreg
+      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+      .operator->());
 
     // Forth, build unprivileged stores.
-    convertSTRimm(MBB, MI, interimReg0, baseReg, imm, newOpcode, DL, TII);
-    convertSTRimm(MBB, MI, interimReg1, baseReg, imm + 4, newOpcode, DL, TII);
+    std::vector<MachineInstr *> newInstrsSTRImm = 
+      convertSTRimm(MBB, MI, interimReg0, baseReg, imm, newOpcode, DL, TII, true);
+    newInstrs.insert(newInstrs.end(), newInstrsSTRImm.begin(), newInstrsSTRImm.end());
+    newInstrsSTRImm = 
+      convertSTRimm(MBB, MI, interimReg1, baseReg, imm + 4, newOpcode, DL, TII, true);
+    newInstrs.insert(newInstrs.end(), newInstrsSTRImm.begin(), newInstrsSTRImm.end());
 
     // Last, restore r0, r1.
-    BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(interimReg0).addReg(interimReg1);
+      .addReg(interimReg0).addReg(interimReg1)
+      .operator->());
   } 
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
