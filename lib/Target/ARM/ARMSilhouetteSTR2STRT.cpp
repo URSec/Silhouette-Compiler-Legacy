@@ -618,51 +618,52 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
 // Return:
 //   None.
 //
-void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
+static void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
                    unsigned sourceReg, unsigned baseReg, unsigned offsetReg,
                    unsigned newOpcode,
-                   DebugLoc &DL,
-                   const TargetInstrInfo *TII) {
+                   DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+
   if (MI->getNumExplicitOperands() == 5) {
     // STR(register) Encoding T1; no lsl
     // Add up the base and offset registers.
-    buildITInstr(MBB, MI, DL, TII);
-    BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
-      .addReg(baseReg)
-      .addReg(baseReg)
-      .addReg(offsetReg);
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tADDrr), baseReg)
+      .addReg(baseReg).addReg(baseReg).addReg(offsetReg)
+      .operator->());
 
     // Build an unprivileged store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
 
     // Restore the base register.
-    buildITInstr(MBB, MI, DL, TII);
-    BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
-      .addReg(baseReg)
-      .addReg(baseReg)
-      .addReg(offsetReg);
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBrr), baseReg)
+      .addReg(baseReg).addReg(baseReg).addReg(offsetReg)
+      .operator->());
   } else {
     // STR(registr) Encoding T2; with lsl
     uint8_t imm = MI->getOperand(3).getImm();
     // Add up the base and offset registers (add with lsl).
-    // This will generate an add.w, not adds.w; so we don't need put it inside 
-    // an IT block.
-    BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDrs), baseReg)
-      .addReg(baseReg).addReg(offsetReg)
-      .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm))
-      .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(0);  // opt:%noreg
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDrs), baseReg)
+                        .addReg(baseReg).addReg(offsetReg)
+                        .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm))
+                        .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+                        .addReg(0)  // opt:%noreg
+                        .operator->());
 
     // Build an unprivileged store.
-    buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII);
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
 
     // Restore the base register.
-    BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBrs), baseReg)
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBrs), baseReg)
       .addReg(baseReg).addReg(offsetReg)
       .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, imm)) 
       .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
-      .addReg(0);  // opt:%noreg
+      .addReg(0)  // opt:%noreg
+      .operator->());
   }
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
