@@ -106,8 +106,10 @@ static unsigned getNewOpcode(unsigned opcode) {
     case ARM::tPUSH:            // A7.7.99 Encoding T1;
     case ARM::t2STMDB_UPD: // A7.7.99 Encoding T2; 
     // store multiple FP registers to memory; actually they're VPUSH.
-    case ARM::VSTMDDB_UPD: // A7.7.249 Encoding T1; double-precision registers
-    case ARM::VSTMSDB_UPD: // A7.7.249 Encoding T1; single-precision registers
+    case ARM::VSTMDDB_UPD: // A7.7.249 Encoding T1; double-precision; update first
+    case ARM::VSTMSDB_UPD: // A7.7.249 Encoding T1; single-precision; update first
+    case ARM::VSTMDIA_UPD: // A7.7.255 Encoding T1; double-precision; update later
+    case ARM::VSTMSIA_UPD: // A7.7.255 Encoding T2; single-precision; update later
       return ARM::t2STRT;
 
     // store half word
@@ -949,56 +951,75 @@ static void convertPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
 
 
 //
-// Function convertVPUSH()
+// Function convertVSTM()
 //
 // Description:
-//   This function converts a VPUSH to multiple STRT.
+//   This function converts a VSTM to multiple STRT.
 //
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
 //   MI - The MachineInstr before which to insert the the new unprivileged store.
 //   baseReg - The register used as the base register to get the memory address.
-//   isSinglePrecision - Indicate if it is a single-precision or double-precision store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
 // Outputs:
 //   Multiple STRT and a sub to update the SP.
 //
-static void convertVPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
-                 bool isSinglePrecision,
+static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
   std::vector<MachineInstr *> newInstrs;
   std::vector<MachineInstr *> newInstrsVSTR;
 
-  unsigned SP = ARM::SP;
+  unsigned SP = ARM::SP;  // for the convenience of typing
+  unsigned opcode = MI->getOpcode();
+  bool isSinglePrecision = (opcode == ARM::VSTMSDB_UPD || 
+                            opcode == ARM::VSTMSIA_UPD);
+  bool isPush = (opcode == ARM::VSTMSDB_UPD || opcode == ARM::VSTMDDB_UPD);
+  unsigned memReg = isPush ? SP : MI->getOperand(0).getReg();
+
   // Get the register list.
   unsigned numOfReg = MI->getNumOperands() - 4;
   std::vector<unsigned> regList;
   for (unsigned i = 0; i < numOfReg; i++) {
     regList.push_back(MI->getOperand(i + 4).getReg());
   }
-  
+
   // Store multiple floating-point registers.
   if (isSinglePrecision) {
-    // Update SP. 
-    // A VPUSH stores registers from the lower address to higher address.
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP).addImm(numOfReg)
-      .operator->());
+    if (isPush) {
+      // Update SP. 
+      newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+          .addReg(SP).addImm(numOfReg)
+          .operator->());
+    }
 
     // Store all registers.
     for (unsigned i = 0; i < numOfReg; i++) {
-      newInstrsVSTR = convertVSTR(MBB, MI, regList[i], SP, i * 4, true, DL, TII, true);
+      newInstrsVSTR = convertVSTR(MBB, MI, regList[i], memReg, i * 4, true, DL, TII, true);
       newInstrs.insert(newInstrs.end(), newInstrsVSTR.begin(), newInstrsVSTR.end());
     }
+
+    // If this is VSTMSIA_UPD we need update the base register.
+    if (!isPush) {
+      buildtADDi8(MBB, MI, memReg, numOfReg << 2, true, newInstrs, TII);
+    }
   } else {
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP).addImm(numOfReg * 2)
-      .operator->());
+    if (isPush) {
+      newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
+          .addReg(SP).addImm(numOfReg * 2)
+          .operator->());
+    }
+
+    // Store all registers.
     for (unsigned i = 0; i < numOfReg; i++) {
-      newInstrsVSTR = convertVSTR(MBB, MI, regList[i], SP, i * 8, false, DL, TII, true);
+      newInstrsVSTR = convertVSTR(MBB, MI, regList[i], memReg, i * 8, false, DL, TII, true);
       newInstrs.insert(newInstrs.end(), newInstrsVSTR.begin(), newInstrsVSTR.end());
+    }
+
+    // If this is VSTMDIA_UPD we need update the base register.
+    if (!isPush) {
+      buildtADDi8(MBB, MI, memReg, numOfReg << 3, true, newInstrs, TII);
     }
   }
 
@@ -1274,12 +1295,13 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           break;
 
         // Store multiple FP registers.
-        // According to ARMInstrVFP.td, it looks like that LLVM 4.0 didn't
-        // generate VSTM. VSTMDDB_UPD and VSTMSDB_UPD are aliases for vpush. 
+        // VSTMDDB_UPD and VSTMSDB_UPD are aliases for vpush. 
         case ARM::VSTMDDB_UPD:  // VPUSH double-precision registers
         case ARM::VSTMSDB_UPD:  // VPUSH single-precision registers
+        case ARM::VSTMDIA_UPD:  // vstmia double-precision then update
+        case ARM::VSTMSIA_UPD:  // vstmia single-precision then update
 #if 1
-          convertVPUSH(MBB, &MI, opcode == ARM::VSTMSDB_UPD, DL, TII);
+          convertVSTM(MBB, &MI, DL, TII);
           originalStores.push_back(&MI);
 #endif
           break;
