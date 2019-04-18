@@ -476,6 +476,7 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
     return newInstrs;
   } else {
     insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+    return std::vector<MachineInstr *>();
   }
 }
 
@@ -1258,6 +1259,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::t2STRD_PRE:
         case ARM::t2STRD_POST:
           // TO-DO
+          printOperands(MI);
           break;
 
         // Floating stores.
