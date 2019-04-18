@@ -381,7 +381,7 @@ static void insertITInstrIfNeeded(std::vector<MachineInstr *> &newInstrs,
 // Outputs:
 //   A sequence of newly added instructions.
 //
-static void buildtADDi8(MachineBasicBlock &MBB, MachineInstr *MI, 
+static void buildAddorSub(MachineBasicBlock &MBB, MachineInstr *MI, 
                       unsigned baseReg, unsigned imm, bool isAdd,
                       std::vector<MachineInstr *> &newInstrs,
                       const TargetInstrInfo *TII) {
@@ -440,14 +440,14 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
   // the new str, and restore the base registr.
   if (imm < 0) {
     // This sub will update the status flags; we need put it in a IT block.
-    buildtADDi8(MBB, MI, baseReg, -imm, false, newInstrs, TII);
+    buildAddorSub(MBB, MI, baseReg, -imm, false, newInstrs, TII);
     
     // insert a new unprivileged store
     newInstrs.push_back(
         buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
 
     // restore the base register
-    buildtADDi8(MBB, MI, baseReg, -imm, true, newInstrs, TII);
+    buildAddorSub(MBB, MI, baseReg, -imm, true, newInstrs, TII);
   } else {
     if (imm > 255) {
       // If the imm is greater than 255, we need to add the imm to the base 
@@ -545,7 +545,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg).addImm(imm)
           .operator->());
       } else {
-        buildtADDi8(MBB, MI, baseReg, -imm, false, newInstrs, TII);
+        buildAddorSub(MBB, MI, baseReg, -imm, false, newInstrs, TII);
       }
     } else {
       // imm >= 0.
@@ -557,7 +557,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg).addImm(imm)
           .operator->());
       } else {
-        buildtADDi8(MBB, MI, baseReg, imm, true, newInstrs, TII);
+        buildAddorSub(MBB, MI, baseReg, imm, true, newInstrs, TII);
       }
     }
 
@@ -579,7 +579,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg).addImm(imm)
           .operator->());
       } else {
-        buildtADDi8(MBB, MI, baseReg, -imm, false, newInstrs, TII);
+        buildAddorSub(MBB, MI, baseReg, -imm, false, newInstrs, TII);
       }
     } else {
       if (baseReg == ARM::SP) {
@@ -588,7 +588,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg).addImm(imm)
           .operator->());
       } else {
-        buildtADDi8(MBB, MI, baseReg, imm, true, newInstrs, TII);
+        buildAddorSub(MBB, MI, baseReg, imm, true, newInstrs, TII);
       }
     }
   }
@@ -868,7 +868,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg).addImm(numOfReg)
           .operator->());
       } else {
-        buildtADDi8(MBB, MI, baseReg, numOfReg << 2, true, newInstrs, TII);
+        buildAddorSub(MBB, MI, baseReg, numOfReg << 2, true, newInstrs, TII);
       }
     }
   } else {
@@ -879,7 +879,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
         .addReg(baseReg).addImm(numOfReg)
         .operator->());
     } else {
-      buildtADDi8(MBB, MI, baseReg, numOfReg << 2, false, newInstrs, TII);
+      buildAddorSub(MBB, MI, baseReg, numOfReg << 2, false, newInstrs, TII);
     }
 
     // Store all the registers.
@@ -895,7 +895,7 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
           .addReg(baseReg).addImm(numOfReg)
           .operator->());
       } else {
-        buildtADDi8(MBB, MI, baseReg, numOfReg << 2, true, newInstrs, TII);
+        buildAddorSub(MBB, MI, baseReg, numOfReg << 2, true, newInstrs, TII);
       }
     }
   }
@@ -1003,7 +1003,7 @@ static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
 
     // If this is VSTMSIA_UPD we need update the base register.
     if (!isPush) {
-      buildtADDi8(MBB, MI, memReg, numOfReg << 2, true, newInstrs, TII);
+      buildAddorSub(MBB, MI, memReg, numOfReg << 2, true, newInstrs, TII);
     }
   } else {
     if (isPush) {
@@ -1020,7 +1020,7 @@ static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
 
     // If this is VSTMDIA_UPD we need update the base register.
     if (!isPush) {
-      buildtADDi8(MBB, MI, memReg, numOfReg << 3, true, newInstrs, TII);
+      buildAddorSub(MBB, MI, memReg, numOfReg << 3, true, newInstrs, TII);
     }
   }
 
