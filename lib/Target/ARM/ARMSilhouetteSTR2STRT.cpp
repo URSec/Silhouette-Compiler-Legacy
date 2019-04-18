@@ -700,10 +700,10 @@ static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
                            bool isSinglePrecision,
                            DebugLoc &DL, const TargetInstrInfo *TII,
                            bool calledByOtherConverter = false) {
+  std::vector<MachineInstr *> newInstrs;
+
   unsigned newOpcode = ARM::t2STRT;
   unsigned R0 = ARM::R0, R1 = ARM::R1, SP = ARM::SP;
-
-  std::vector<MachineInstr *> newInstrs;
 
   if (isSinglePrecision) {
     // store a single-precision register 
@@ -819,6 +819,8 @@ static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
 static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
                  unsigned baseReg,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+
   unsigned opcode = MI->getOpcode();
   unsigned newOpcode = ARM::t2STRT;
 
@@ -852,58 +854,50 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
     
     // Store all registers to addresses starting from baseReg
     for (unsigned i = 0; i < numOfReg; i++) {
-      buildUnprivStr(MBB, MI, regList[i], baseReg, i * 4, newOpcode, DL, TII);
+      newInstrs.push_back(
+          buildUnprivStr(MBB, MI, regList[i], baseReg, i * 4, newOpcode, DL, TII));
     }
 
     // If this is a write-back store, update the baseReg.
     if (opcode != ARM::t2STMIA) {
       if (baseReg == ARM::SP) {
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
-          .addReg(baseReg)
-          .addImm(numOfReg);
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg).addImm(numOfReg)
+          .operator->());
       } else {
-        buildITInstr(MBB, MI, DL, TII);
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
-          .addDef(ARM::CPSR, RegState::Dead)
-          .addUse(baseReg)
-          .addImm(numOfReg << 2);
+        buildtADDi8(MBB, MI, baseReg, numOfReg << 2, true, newInstrs, TII);
       }
     }
   } else {
     // STMDB: Store Multiple Decrement Before
     // First, sub the base register to be the starting address of store.
     if (baseReg == ARM::SP) {
-      BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
-        .addReg(baseReg)
-        .addImm(numOfReg);
+      newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
+        .addReg(baseReg).addImm(numOfReg)
+        .operator->());
     } else {
-      buildITInstr(MBB, MI, DL, TII);
-      BuildMI(MBB, MI, DL, TII->get(ARM::tSUBi8), baseReg)
-        .addDef(ARM::CPSR, RegState::Dead)
-        .addUse(baseReg)
-        .addImm(numOfReg << 2);
+      buildtADDi8(MBB, MI, baseReg, numOfReg << 2, false, newInstrs, TII);
     }
 
     // Store all the registers.
     for (unsigned i = 0; i < numOfReg; i++) {
-      buildUnprivStr(MBB, MI, regList[i], baseReg, i * 4, newOpcode, DL, TII);
+      newInstrs.push_back(
+          buildUnprivStr(MBB, MI, regList[i], baseReg, i * 4, newOpcode, DL, TII));
     }
 
     // If this is not a write-back store, we need restore base register.
     if (opcode == ARM::t2STMDB) {
       if (baseReg == ARM::SP) {
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
-          .addReg(baseReg)
-          .addImm(numOfReg);
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
+          .addReg(baseReg).addImm(numOfReg)
+          .operator->());
       } else {
-        buildITInstr(MBB, MI, DL, TII);
-        BuildMI(MBB, MI, DL, TII->get(ARM::tADDi8), baseReg)
-          .addDef(ARM::CPSR, RegState::Dead)
-          .addUse(baseReg)
-          .addImm(numOfReg << 2);
+        buildtADDi8(MBB, MI, baseReg, numOfReg << 2, true, newInstrs, TII);
       }
     }
   }
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
