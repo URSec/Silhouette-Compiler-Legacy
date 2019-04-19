@@ -46,6 +46,29 @@ static inline bool isARMArea1Register(unsigned Reg, bool isIOS) {
   }
 }
 
+
+/// isARMArea1RegisterExceptLR - Returns true if the register is a low register (r0-r7)
+/// or a stack/pc register that we should push/pop, except for LR
+static inline bool isARMArea1RegisterExceptLR(unsigned Reg, bool isIOS) {
+  using namespace ARM;
+  switch (Reg) {
+    case R0:  case R1:  case R2:  case R3:
+    case R4:  case R5:  case R6:  case R7:
+    case SP:  case PC:
+      return true;
+// region RECFISH
+// Don't spill LR onto the stack
+    case LR:
+      return false; 
+// endregion RECFISH
+    case R8:  case R9:  case R10: case R11: case R12:
+      // For iOS we want r7 and lr to be next to each other.
+      return !isIOS;
+    default:
+      return false;
+  }
+}
+
 static inline bool isARMArea2Register(unsigned Reg, bool isIOS) {
   using namespace ARM;
   switch (Reg) {

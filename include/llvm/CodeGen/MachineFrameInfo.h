@@ -277,6 +277,9 @@ class MachineFrameInfo {
   /// Not null, if shrink-wrapping found a better place for the epilogue.
   MachineBasicBlock *Restore = nullptr;
 
+  /// Silhouette: If true, the stack has been doubled for shadow stack implementation
+  bool isDoubled = false;
+
 public:
   explicit MachineFrameInfo(unsigned StackAlignment, bool StackRealignable,
                             bool ForcedRealign)
@@ -474,6 +477,17 @@ public:
 
   /// Set the size of the stack.
   void setStackSize(uint64_t Size) { StackSize = Size; }
+
+  /// Silhouette: Double stack size for shadow stack
+  bool prepareShadowStack() {
+    if (isDoubled) {
+      return false;
+    } else {
+      isDoubled = true;
+      StackSize = StackSize * 2;
+      return true;
+    }
+  }
 
   /// Estimate and return the size of the stack frame.
   unsigned estimateStackSize(const MachineFunction &MF) const;

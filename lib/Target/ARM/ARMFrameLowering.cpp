@@ -29,6 +29,7 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetOptions.h"
+#include <iostream>
 
 #define DEBUG_TYPE "arm-frame-lowering"
 
@@ -300,6 +301,9 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF,
   bool isARM = !AFI->isThumbFunction();
   unsigned Align = STI.getFrameLowering()->getStackAlignment();
   unsigned ArgRegsSaveSize = AFI->getArgRegsSaveSize();
+  // Silhouette: Double stack size for parallel shadow stack
+  MFI.prepareShadowStack();
+  // End Silhouette modification
   unsigned NumBytes = MFI.getStackSize();
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
 
@@ -942,12 +946,22 @@ void ARMFrameLowering::emitPushInst(MachineBasicBlock &MBB,
       for (unsigned i = 0, e = Regs.size(); i < e; ++i)
         MIB.addReg(Regs[i].first, getKillRegState(Regs[i].second));
     } else if (Regs.size() == 1) {
-      MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc),
+      if (Regs[0].first == ARM::LR){
+        MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc),
+                                        ARM::SP)
+        .addReg(Regs[0].first, getKillRegState(Regs[0].second))
+        .addReg(ARM::SP).setMIFlags(MIFlags)
+        .addImm(-4 - 20);
+        AddDefaultPred(MIB);
+      } else {
+        MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc),
                                         ARM::SP)
         .addReg(Regs[0].first, getKillRegState(Regs[0].second))
         .addReg(ARM::SP).setMIFlags(MIFlags)
         .addImm(-4);
-      AddDefaultPred(MIB);
+        AddDefaultPred(MIB);
+      }
+      
     }
     Regs.clear();
 
@@ -1042,6 +1056,9 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
       // only do that for LDM.
       if (Regs[0] == ARM::PC)
         Regs[0] = ARM::LR;
+      unsigned imm = 4;
+      if (Regs[0] == ARM::LR)
+        imm = 4 + 20;
       MachineInstrBuilder MIB =
         BuildMI(MBB, MI, DL, TII.get(LdrOpc), Regs[0])
           .addReg(ARM::SP, RegState::Define)
@@ -1050,9 +1067,9 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
       // that refactoring is complete (eventually).
       if (LdrOpc == ARM::LDR_POST_REG || LdrOpc == ARM::LDR_POST_IMM) {
         MIB.addReg(0);
-        MIB.addImm(ARM_AM::getAM2Opc(ARM_AM::add, 4, ARM_AM::no_shift));
+        MIB.addImm(ARM_AM::getAM2Opc(ARM_AM::add, imm, ARM_AM::no_shift));
       } else
-        MIB.addImm(4);
+        MIB.addImm(imm);
       AddDefaultPred(MIB);
     }
     Regs.clear();
@@ -1306,6 +1323,140 @@ static void emitAlignedDPRCS2Restores(MachineBasicBlock &MBB,
   std::prev(MI)->addRegisterKilled(ARM::R4, TRI);
 }
 
+// Silhouette: Shadow Stack
+// isLRSpilled (Inherit from RECFISH) - Look at the given callee saved info to determine whether the 
+// ARM::LR register is spilled.
+static bool isLRSpilled(const std::vector<CalleeSavedInfo> &CSI) {
+  bool LRSpilled = false;
+  unsigned i = CSI.size();
+  for (; i != 0; --i) {
+    unsigned Reg = CSI[i-1].getReg();
+    if (Reg == ARM::LR) {
+      LRSpilled = true;
+    }
+  }
+  return LRSpilled;
+}
+
+// shouldBlockUseShadowStack - Determines whether the shadow stack should be 
+// used to store senstive information for the given block.
+static bool shouldBlockUseShadowStack(MachineBasicBlock &MBB) {
+  bool SSEnabled(true); // TODO: Turn into a compilation flag
+  if (!SSEnabled) return false;
+
+  const Function *Func = MBB.getParent()->getFunction();
+  const std::string Name = Func->getName().lower();
+
+  std::set<std::string> blacklist = {
+    "main",
+		"prvmiscinitialization",
+		"hal_init",
+		"hal_nvic_setprioritygrouping",
+		"assert_param",
+		"nvic_setprioritygrouping",
+		"hal_systick_config",
+		"systick_config",
+		"hal_nvic_setpriority",
+		"is_nvic_sub_priority",
+		"is_nvic_preemption_priority",
+		"nvic_getprioritygrouping",
+		"nvic_encodepriority",
+		"hal_mspinit",
+		"nvic_setpriority",
+		"systemclock_config",
+		"hal_rcc_oscconfig",
+		"rcc_setflashlatencyfrommsirange",
+		"hal_pwrex_getvoltagerange",
+		"hal_rcc_getsysclockfreq",
+		"hal_inittick",
+		"hal_gettick",
+		"prvinitializeheap",
+		"vportdefineheapregions",
+		"configassert",
+		"bsp_led_init",
+		"hal_nvic_enableirq",
+		"nvic_enableirq",
+		"hal_rng_init",
+		"hal_rng_mspinit",
+		"rtc_init",
+		"hal_rtc_init",
+		"hal_rtc_mspinit",
+		"rtc_enterinitmode",
+		"hal_rtc_settime",
+		"hal_rtc_setdate",
+		"console_uart_init",
+		"bsp_com_init",
+		"hal_gpio_init",
+		"hal_uart_init",
+		"xloggingtaskinitialize",
+		"xtaskcreate",
+		"vapplicationgetidletaskmemory",
+		"xtaskcreatestatic",
+    "hal_rcc_clockconfig",
+    "hal_rccex_periphclkconfig",
+    "bsp_pb_init",
+    "hal_rtc_waitforsynchro",
+    "uart_setconfig",
+    "hal_rcc_getpclk2freq",
+    "uart_checkidlestate",
+    "uart_waitonflaguntiltimeout",
+    "xqueuegenericcreate",
+    "pvportmalloc",
+    "xtaskresumeall",
+    "prvinitialisenewqueue",
+    "xqueuegenericreset",
+    "prvinitialisenewtask",
+    "pxcurrenttcb",
+    "pxportinitialisestack",
+    "prvaddnewtasktoreadylist",
+    "prvportinitialisetasklists",
+    "prvinitialisetasklists",
+    "vtaskstartscheduler",
+    "xtimercreatetimertask",
+    "prvcheckforvalidlistandqueue",
+    "xqueuegenericcreatestatic",
+    "vapplicationgettimertaskmemory",
+    "xportstartscheduler",
+    "strdup",
+    "malloc",
+    "_sbrk",
+    "_sbrk_r",
+    "_exit",
+    "_kill",
+    "xqueuegenericsend",
+    "prvcopydatatoqueue",
+    "mqtt_agent_publish",
+    "prvsendcommandtomqtttask",
+    "systick_handler",
+    "hal_systick_irqhandler",
+    "hal_systick_callback",
+    "vportraisebasepri",
+    "vtaskswitchcontext",
+    "hal_flash_program",
+    "flash_waitforlastoperation",
+    "flash_program_doubleword"
+  };
+
+  bool ShouldSkipFunction = blacklist.find(Name) != blacklist.end();
+  if (ShouldSkipFunction)
+    std::cout << "[RECFISH] Will not use shadow stack for function " << Name << std::endl;
+
+  return !ShouldSkipFunction;
+}
+
+static void spillParallelShadowStack(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator MI) {
+  MachineFunction &MF = *MBB.getParent();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
+  unsigned StackSize = MFI.getStackSize() / 2;
+  assert(AFI->isThumbFunction() && "Shadow stack is not supported in ARM mode");
+  
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  DebugLoc DL;
+  BuildMI(MBB, MI, DL, TII.get(ARM::t2STRi12)).addReg(ARM::R0).addReg(ARM::R1).setMIFlags(MachineInstr::FrameSetup).addImm(2);
+}
+
 bool ARMFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator MI,
                                         const std::vector<CalleeSavedInfo> &CSI,
@@ -1321,8 +1472,35 @@ bool ARMFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
     ARM::t2STR_PRE : ARM::STR_PRE_IMM;
   unsigned FltOpc = ARM::VSTMDDB_UPD;
   unsigned NumAlignedDPRCS2Regs = AFI->getNumAlignedDPRCS2Regs();
-  emitPushInst(MBB, MI, CSI, PushOpc, PushOneOpc, false, &isARMArea1Register, 0,
+  // bool UseShadowStack = shouldBlockUseShadowStack(MBB);
+  // bool(*Area1RegisterCheck)(unsigned, bool) =
+  //              UseShadowStack ? &isARMArea1RegisterExceptLR : &isARMArea1Register;
+
+  bool(*Area1RegisterCheck)(unsigned, bool) =
+               1 ? &isARMArea1Register : &isARMArea1Register;
+  // emitPushInst(MBB, MI, CSI, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
+  //              MachineInstr::FrameSetup);
+  // If LR is being stored, and MBB is not in blacklist, then store LR separately
+  bool has_LR = false;
+  std::vector<CalleeSavedInfo> CSI_new;
+  std::vector<CalleeSavedInfo> CSI_LR;
+  for (CalleeSavedInfo CSI_ent : CSI){
+    if (CSI_ent.getReg() == ARM::LR){
+      has_LR = true;
+      CSI_LR.push_back(CSI_ent);
+    } else {
+      CSI_new.push_back(CSI_ent);
+    }
+  }
+  if (has_LR){
+    emitPushInst(MBB, MI, CSI_new, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
                MachineInstr::FrameSetup);
+    emitPushInst(MBB, MI, CSI_LR, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
+               MachineInstr::FrameSetup);
+  } else {
+    emitPushInst(MBB, MI, CSI, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
+               MachineInstr::FrameSetup);
+  }
   emitPushInst(MBB, MI, CSI, PushOpc, PushOneOpc, false, &isARMArea2Register, 0,
                MachineInstr::FrameSetup);
   emitPushInst(MBB, MI, CSI, FltOpc, 0, true, &isARMArea3Register,
@@ -1333,6 +1511,9 @@ bool ARMFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
   // and these spills.
   if (NumAlignedDPRCS2Regs)
     emitAlignedDPRCS2Spills(MBB, MI, NumAlignedDPRCS2Regs, CSI, TRI);
+  // if (UseShadowStack && isLRSpilled(CSI)) {
+  //   spillParallelShadowStack(MBB, MI);
+  // }
 
   return true;
 }
@@ -1361,8 +1542,29 @@ bool ARMFrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
               NumAlignedDPRCS2Regs);
   emitPopInst(MBB, MI, CSI, PopOpc, LdrOpc, isVarArg, false,
               &isARMArea2Register, 0);
-  emitPopInst(MBB, MI, CSI, PopOpc, LdrOpc, isVarArg, false,
+  // If LR is being loaded, and MBB is not in blacklist, then load LR separately
+  bool has_LR = false;
+  std::vector<CalleeSavedInfo> CSI_new;
+  std::vector<CalleeSavedInfo> CSI_LR;
+  for (CalleeSavedInfo CSI_ent : CSI){
+    if (CSI_ent.getReg() == ARM::LR){
+      has_LR = true;
+      CSI_LR.push_back(CSI_ent);
+    } else {
+      CSI_new.push_back(CSI_ent);
+    }
+  }
+  if (has_LR){
+    emitPopInst(MBB, MI, CSI_new, PopOpc, LdrOpc, isVarArg, false,
               &isARMArea1Register, 0);
+    emitPopInst(MBB, MI, CSI_LR, PopOpc, LdrOpc, isVarArg, false,
+              &isARMArea1Register, 0);
+  } else {
+    emitPopInst(MBB, MI, CSI, PopOpc, LdrOpc, isVarArg, false,
+              &isARMArea1Register, 0);
+  }
+  // emitPopInst(MBB, MI, CSI, PopOpc, LdrOpc, isVarArg, false,
+  //             &isARMArea1Register, 0);
 
   return true;
 }
