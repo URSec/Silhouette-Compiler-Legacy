@@ -512,7 +512,6 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
 //   newOpcode - The opcode of the unprivileged store.
-//   preIndex - Indicate the original instruction is pre-indexed or post-indexed.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
@@ -524,10 +523,15 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
 //
 void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
                           unsigned sourceReg, unsigned baseReg, int64_t imm,
-                          bool preIndex,
                           unsigned newOpcode,
                           DebugLoc &DL, const TargetInstrInfo *TII) {
   std::vector<MachineInstr *> newInstrs;
+  unsigned opcode = MI->getOpcode();
+  // Indicate the original instruction is pre-indexed or post-indexed.
+  bool preIndex = (opcode == ARM::t2STR_PRE ||
+                   opcode == ARM::t2STRH_PRE ||
+                   opcode == ARM::t2STRB_PRE ||
+                   opcode == ARM::t2STRD_PRE);
 
   if (preIndex == true) {
     // This is a pre-indexed store.
@@ -594,6 +598,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
   }
   insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
+
 
 
 //
@@ -1202,7 +1207,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #endif
           break;
 
-        // indexed stores
+        // stores with write-back
         // store word; A7.7.158 Encoding T4: STR<c> <Rt>,[<Rn>,#+/-<imm8>]!
         case ARM::t2STR_PRE:  // pre-indexed store
         case ARM::t2STR_POST: // post-indexed store
@@ -1216,8 +1221,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
-          convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, 
-              opcode == ARM::t2STR_PRE, newOpcode, DL, TII);
+          convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
           break;
@@ -1258,8 +1262,6 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // STRD (immediate) with write back
         case ARM::t2STRD_PRE:
         case ARM::t2STRD_POST:
-          // TO-DO
-          printOperands(MI);
           break;
 
         // Floating stores.
