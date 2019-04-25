@@ -508,11 +508,11 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
 // Inputs:
 //   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
 //   MI - The MachineInstr before which to insert the the new unprivileged store.
-//   sourceReg - The register whose contents will be stored to some memory address.
+//   sourceReg - The register whose content will be stored to some memory address.
+//   sourceReg2 - The second register to store. Only valid for STRD.
 //   baseReg - The register used as the base register to compute the memory address.
 //   imm - The immediate that is added to the baseReg to compute the memory address.
 //   newOpcode - The opcode of the unprivileged store.
-//   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
 //
 // Outputs:
@@ -522,9 +522,10 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
 //   None.
 //
 void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
-                          unsigned sourceReg, unsigned baseReg, int64_t imm,
+                          unsigned sourceReg, unsigned sourceReg2,
+                          unsigned baseReg, int64_t imm,
                           unsigned newOpcode,
-                          DebugLoc &DL, const TargetInstrInfo *TII) {
+                          const TargetInstrInfo *TII) {
   std::vector<MachineInstr *> newInstrs;
   unsigned opcode = MI->getOpcode();
   // Indicate the original instruction is pre-indexed or post-indexed.
@@ -543,7 +544,6 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
 
         // For SUB (SP minus imm), imm = ZeroExtend(imm7:'00', 32)
         assert((-imm) % 4 == 0 && "IMM is not a multiple of 4.");
-
         imm = (-imm) >> 2;
         newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
           .addReg(baseReg).addImm(imm)
@@ -568,19 +568,28 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
     // Second, build a new store.
     newInstrs.push_back(
         buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
+    if (opcode == ARM::t2STRD_PRE) {
+      // Store the second register if this is a STRD.
+      newInstrs.push_back(
+          buildUnprivStr(MBB, MI, sourceReg2, baseReg, 4, newOpcode, DL, TII));
+    }
   } else {
     // This is a post-indexed store.
     // First, build a new store.
     newInstrs.push_back(
         buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
+    if (opcode == ARM::t2STRD_POST) {
+      // Store the second register if this is a STRD.
+      newInstrs.push_back(
+          buildUnprivStr(MBB, MI, sourceReg2, baseReg, 4, newOpcode, DL, TII));
+    }
 
     // Second, update the imm to the base register
     if (imm < 0) {
       if (baseReg == ARM::SP) {
         assert((-imm) % 4 == 0 && "IMM is not a multiple of 4.");
-        imm = (-imm) >> 2;
         newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), baseReg)
-          .addReg(baseReg).addImm(imm)
+          .addReg(baseReg).addImm((-imm) >> 2)
           .operator->());
       } else {
         buildAddorSub(MBB, MI, baseReg, -imm, false, newInstrs, TII);
@@ -589,7 +598,7 @@ void convertSTRimmIndexed(MachineBasicBlock &MBB, MachineInstr *MI,
       if (baseReg == ARM::SP) {
         assert(imm % 4 == 0 && "IMM is not a multiple of 4.");
         newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tADDspi), baseReg)
-          .addReg(baseReg).addImm(imm)
+          .addReg(baseReg).addImm(imm >> 2)
           .operator->());
       } else {
         buildAddorSub(MBB, MI, baseReg, imm, true, newInstrs, TII);
@@ -1221,7 +1230,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
-          convertSTRimmIndexed(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+          // There is no second base register for these three kinds of stores.
+          convertSTRimmIndexed(MBB, &MI, sourceReg, 0, baseReg, imm, newOpcode, TII);
           originalStores.push_back(&MI);
 #endif
           break;
@@ -1262,6 +1272,14 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // STRD (immediate) with write back
         case ARM::t2STRD_PRE:
         case ARM::t2STRD_POST:
+#if 1
+          sourceReg = MI.getOperand(1).getReg();
+          sourceReg2 = MI.getOperand(2).getReg();
+          baseReg = MI.getOperand(0).getReg();
+          imm = MI.getOperand(4).getImm();
+          convertSTRimmIndexed(MBB, &MI, sourceReg, sourceReg2, baseReg, imm, newOpcode, TII);
+          originalStores.push_back(&MI);
+#endif
           break;
 
         // Floating stores.
