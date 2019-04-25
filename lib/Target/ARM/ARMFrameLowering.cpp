@@ -946,12 +946,11 @@ void ARMFrameLowering::emitPushInst(MachineBasicBlock &MBB,
       for (unsigned i = 0, e = Regs.size(); i < e; ++i)
         MIB.addReg(Regs[i].first, getKillRegState(Regs[i].second));
     } else if (Regs.size() == 1) {
-      if (Regs[0].first == ARM::LR){
-        MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc),
-                                        ARM::SP)
-        .addReg(Regs[0].first, getKillRegState(Regs[0].second))
+      if (Regs[0].first == ARM::LR && StrOpc == ARM::t2STRi12){
+        MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc))
         .addReg(ARM::SP).setMIFlags(MIFlags)
-        .addImm(-4 - 20);
+        .addReg(Regs[0].first, getKillRegState(Regs[0].second))
+        .addImm(1024);
         AddDefaultPred(MIB);
       } else {
         MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc),
@@ -1495,7 +1494,7 @@ bool ARMFrameLowering::spillCalleeSavedRegisters(MachineBasicBlock &MBB,
   if (has_LR){
     emitPushInst(MBB, MI, CSI_new, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
                MachineInstr::FrameSetup);
-    emitPushInst(MBB, MI, CSI_LR, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
+    emitPushInst(MBB, MI, CSI_LR, PushOpc, ARM::t2STRi12, false, Area1RegisterCheck, 0,
                MachineInstr::FrameSetup);
   } else {
     emitPushInst(MBB, MI, CSI, PushOpc, PushOneOpc, false, Area1RegisterCheck, 0,
