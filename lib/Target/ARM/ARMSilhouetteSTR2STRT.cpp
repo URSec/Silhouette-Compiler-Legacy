@@ -1050,10 +1050,13 @@ static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
   unsigned memReg = isPush ? SP : MI->getOperand(0).getReg();
 
   // Get the register list.
-  unsigned numOfReg = MI->getNumOperands() - 4;
+  // The register list of VSTMDIA starts from the fourth operand; all others'
+  // start from the fifth.
+  unsigned regListLoc = (opcode == ARM::VSTMDIA ? 3 : 4);
+  unsigned numOfReg = MI->getNumOperands() - regListLoc;
   std::vector<unsigned> regList;
   for (unsigned i = 0; i < numOfReg; i++) {
-    regList.push_back(MI->getOperand(i + 4).getReg());
+    regList.push_back(MI->getOperand(i + regListLoc).getReg());
   }
 
   // Store multiple floating-point registers.
@@ -1089,7 +1092,7 @@ static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
     }
 
     // If this is VSTMDIA_UPD we need update the base register.
-    if (!isPush) {
+    if (opcode == ARM::VSTMDIA_UPD) {
       buildAddorSub(MBB, MI, memReg, numOfReg << 3, true, newInstrs, TII);
     }
   }
@@ -1378,6 +1381,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::VSTMSDB_UPD:  // VPUSH single-precision registers
         case ARM::VSTMDIA_UPD:  // vstmia double-precision then update
         case ARM::VSTMSIA_UPD:  // vstmia single-precision then update
+        case ARM::VSTMDIA:      // vstmia double-precision no update
 #if 1
           convertVSTM(MBB, &MI, DL, TII);
           originalStores.push_back(&MI);
