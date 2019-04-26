@@ -179,11 +179,6 @@ static void splitITBlockWithSTR(MachineFunction &MF) {
         // number of conditional instructions in the IT block
         unsigned numOfCondInstr = 1;  
 
-#if 0
-        errs() << "Found an IT block in function: " << MF.getName() << "\n";
-        MI.dump();
-#endif
-        
         unsigned firstcond = MI.getOperand(0).getImm();
         unsigned mask = MI.getOperand(1).getImm() & 0x0000000f;
         // Find how many succeeding instructions are controlled by this IT.
@@ -278,6 +273,35 @@ static MachineInstr *buildUnprivStr(MachineBasicBlock &MBB,
           .addReg(sourceReg)
           .addReg(baseReg)
           .addImm(imm).operator->();
+}
+
+
+// 
+// Function backupReg()
+//
+// Description:
+//   This function backs up a register on the stack. First it decreases the SP
+//   by 4, and then do a store. 
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert new instruction.
+//   MI - The MachineInstr before which to insert the the new instruction.
+//   reg - The register to be backed up.
+//   newInstrs - All newly added instructions.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   A sub instruction and a store instruction.
+//  
+//
+static void backupReg(MachineBasicBlock &MBB, MachineInstr *MI, 
+                unsigned reg, std::vector<MachineInstr *> &newInstrs,
+                const TargetInstrInfo *TII) {
+    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
+      .addReg(ARM::SP).addImm(1)
+      .operator->());
+    newInstrs.push_back(
+        buildUnprivStr(MBB, MI, reg, ARM::SP, 0, ARM::t2STRT, DL, TII));
 }
 
 
@@ -450,23 +474,55 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
     buildAddorSub(MBB, MI, baseReg, -imm, true, newInstrs, TII);
   } else {
     if (imm > 255) {
-      // If the imm is greater than 255, we need to add the imm to the base 
-      // register first, create an unprivileged store, and then restore the 
-      // base register.
-      newInstrs.push_back(
-          BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
-          .addReg(baseReg).addImm(imm)
-          .addImm(ARMCC::AL).addReg(0)
-          .operator->());
+      // The range of the imm of an unprivileged store is 0 - 255. If imm > 255,
+      // we need extra instructions to assist the transformation.
+      
+      // If the base register is SP then the imm must be a multiple of 4 to do
+      // a ADD (SP + imm). Although according to the manual, the Encoding T4
+      // of ADD (SP + imm) allows imm to be any value in the range o 0 - 4095,
+      // I couldn't find such an ADD in the .td file. So we pick a register,
+      // back it up on the stack, use this register to compute the target 
+      // address, and then restore it.
+      if (baseReg == ARM::SP && imm % 4 != 0) {
+        // Pick R0 or R1 as the interim register.
+        unsigned interimReg = (sourceReg == ARM::R0 ? ARM::R1 : ARM::R0);
+        backupReg(MBB, MI, interimReg, newInstrs, TII);
 
-      newInstrs.push_back(
-          buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
+        // Compute the destination address.
+        newInstrs.push_back(
+            BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), interimReg)
+            .addReg(ARM::SP).addImm(imm + 4)
+            .addImm(ARMCC::AL).addReg(0)
+            .operator->());
 
-      newInstrs.push_back(
-          BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
-          .addReg(baseReg).addImm(imm)
-          .addImm(ARMCC::AL).addReg(0)
-          .operator->());
+        // Do the store.
+        newInstrs.push_back(
+            buildUnprivStr(MBB, MI, sourceReg, interimReg, 0, newOpcode, DL, TII));
+
+        // Restore the interim register.
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
+            .addImm(ARMCC::AL).addReg(0)
+            .addReg(interimReg)
+            .operator->());
+      } else {
+        // Compute the destination register.
+        newInstrs.push_back(
+            BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
+            .addReg(baseReg).addImm(imm)
+            .addImm(ARMCC::AL).addReg(0)
+            .operator->());
+
+        // Do the store.
+        newInstrs.push_back(
+            buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
+
+        // Restore the base register.
+        newInstrs.push_back(
+            BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
+            .addReg(baseReg).addImm(imm)
+            .addImm(ARMCC::AL).addReg(0)
+            .operator->());
+      }
     } else {
       newInstrs.push_back(
           buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII));
