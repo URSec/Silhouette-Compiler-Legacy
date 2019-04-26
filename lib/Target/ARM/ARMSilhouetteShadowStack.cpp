@@ -305,6 +305,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
             if (MO.isReg()){
               if (MO.getReg() == ARM::LR){
                 // errs() << "Found LR\n";
+                assert(MI.getNextNode() != NULL && "getNextNode() returns a NULL!\n");
                 buildStrSSInstr(MBB, MI.getNextNode(), MO.getReg(), imm, DL, TII);
               }
             }
