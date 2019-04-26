@@ -18,6 +18,7 @@
 #include "ARMSilhouetteCFI.h"
 #include "ARMSilhouetteMemOverhead.h"
 #include "ARMSilhouetteSTR2STRT.h"
+#include "ARMSilhouetteShadowStack.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "TargetInfo/ARMTargetInfo.h"
 #include "llvm/ADT/Optional.h"
@@ -93,6 +94,13 @@ EnableSilhouetteCFI("enable-arm-silhouette-cfi",
                     cl::desc("Enable Silhouette CFI pass"),
                     cl::location(SilhouetteCFI),
                     cl::init(false), cl::Hidden);
+
+bool SilhouetteShadowStack;
+static cl::opt<bool, true>
+EnableSilhouetteShadowStack("enable-arm-silhouette-shadowstack",
+                            cl::desc("Enable Silhouette shadow stack pass"),
+                            cl::location(SilhouetteShadowStack),
+                            cl::init(false), cl::Hidden);
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -567,6 +575,10 @@ void ARMPassConfig::addPreEmitPass() {
 
   if (EnableSilhouetteCFI) {
     addPass(createARMSilhouetteCFI());
+  }
+
+  if (EnableSilhouetteShadowStack) {
+    addPass(createARMSilhouetteShadowStack());
   }
 
   addPass(createARMConstantIslandPass());

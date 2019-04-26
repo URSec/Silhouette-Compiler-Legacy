@@ -50,6 +50,7 @@ add_llvm_target(ARMCodeGen
   ARMSilhouetteCFI.cpp
   ARMSilhouetteMemOverhead.cpp
   ARMSilhouetteSTR2STRT.cpp
+  ARMSilhouetteShadowStack.cpp
   ARMSubtarget.cpp
   ARMTargetMachine.cpp
   ARMTargetObjectFile.cpp
