@@ -36,6 +36,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteMemOverhead.h"
+#include "ARMSilhouetteShadowStack.h"
 using namespace llvm;
 
 static cl::opt<bool>
@@ -69,6 +70,12 @@ EnableSilhouetteMemOverhead("enable-arm-silhouette-mem-overhead",
                             cl::location(SilhouetteMemOverhead),
                             cl::init(false), cl::Hidden);
 
+bool SilhouetteShadowStack;
+static cl::opt<bool, true>
+EnableSilhouetteShadowStack("enable-arm-silhouette-shadowstack",
+                            cl::desc("Enable Silhouette shadow stack pass"),
+                            cl::location(SilhouetteShadowStack),
+                            cl::init(false), cl::Hidden);
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -565,6 +572,10 @@ void ARMPassConfig::addPreEmitPass() {
 
   if (EnableSilhouetteMemOverhead) {
     addPass(createARMSilhouetteMemOverhead());
+  }
+
+  if (EnableSilhouetteShadowStack) {
+    addPass(createARMSilhouetteShadowStack());
   }
 
   addPass(createARMConstantIslandPass());
