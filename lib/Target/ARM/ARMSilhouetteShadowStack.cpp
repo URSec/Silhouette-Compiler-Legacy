@@ -29,7 +29,7 @@
 
 using namespace llvm;
 
-#define SHADOW_STACK_OFFSET 8192
+#define SHADOW_STACK_OFFSET 18004
 
 char ARMSilhouetteShadowStack::ID = 0;
 
@@ -270,7 +270,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
 bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
   StringRef funcName = MF.getName();
   // skip certain functions
-  if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
+  if (funcBlacklist.find(funcName.lower()) != funcBlacklist.end()) return false;
 
 #if 0
   // instrument certain functions
@@ -305,8 +305,10 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
             if (MO.isReg()){
               if (MO.getReg() == ARM::LR){
                 // errs() << "Found LR\n";
-                assert(MI.getNextNode() != NULL && "getNextNode() returns a NULL!\n");
-                buildStrSSInstr(MBB, MI.getNextNode(), MO.getReg(), imm, DL, TII);
+                // Since it is storing LR to shadow stack BEFORE push instruction, 
+                // the immediate should be imm - 4 to find the corresponding address of 
+                // the normal stack
+                buildStrSSInstr(MBB, &MI, MO.getReg(), imm - 4, DL, TII);
               }
             }
           }
