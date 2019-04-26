@@ -29,7 +29,7 @@
 
 using namespace llvm;
 
-#define SHADOW_STACK_OFFSET 18004
+#define SHADOW_STACK_OFFSET -2048
 
 char ARMSilhouetteShadowStack::ID = 0;
 
@@ -228,7 +228,11 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       imm_left -= 4095;
     }
     if (imm < 0){
-      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left));
+      if (subInstr == NULL){
+        subInstr = AddDefaultPred(BuildMI(MBB, MBB.end(), DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left));
+      } else{
+        subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left));
+      }
       imm_left = 0;
     }
     MachineInstr *strInstr = buildLdrSSInstr(MBB, subInstr, spillReg, imm_left, DL, TII);
