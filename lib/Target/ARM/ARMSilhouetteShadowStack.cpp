@@ -29,7 +29,7 @@
 
 using namespace llvm;
 
-#define SHADOW_STACK_OFFSET -2048
+#define SHADOW_STACK_OFFSET 2048
 
 char ARMSilhouetteShadowStack::ID = 0;
 
@@ -274,7 +274,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
 bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
   StringRef funcName = MF.getName();
   // skip certain functions
-  if (funcBlacklist.find(funcName.lower()) != funcBlacklist.end()) return false;
+  if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
 
 #if 0
   // instrument certain functions
