@@ -303,7 +303,13 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
       int64_t imm = SHADOW_STACK_OFFSET; 
 
       switch (opcode) {
+        // A 7.7.157: STMDB writing to SP! is treated the same as PUSH
+        case ARM::t2STMDB:
         case ARM::tPUSH:
+          // If this instruction is not prolog/epilog, then we don't care
+          if (!MI.getFlag(MachineInstr::FrameSetup)){
+            break;
+          }
           // baseReg = MI.getOperand(0).getReg();
           for (MachineOperand &MO : MI.operands()){
             if (MO.isReg()){
@@ -319,6 +325,8 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // MI.print(errs());
           // errs() << "\n";
           break;
+        // A 7.7.40: LDMIA writing to SP! is treated the same as POP
+        case ARM::t2LDMIA_RET:
         case ARM::tPOP_RET:
           // errs() << "POP found: ";
           // MI.print(errs());
