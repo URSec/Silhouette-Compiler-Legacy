@@ -1234,6 +1234,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     std::vector<MachineInstr *> originalStores; // Need delete the original stores.
     for (MachineInstr &MI : MBB) {
+      if (MI.mayStore() == false) continue;
+
       unsigned opcode = MI.getOpcode();
       unsigned sourceReg = 0;
       unsigned sourceReg2 = 0; // for STRD
