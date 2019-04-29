@@ -37,6 +37,7 @@
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteMemOverhead.h"
 #include "ARMSilhouetteShadowStack.h"
+#include "ARMSilhouetteInstrScanner.h"
 using namespace llvm;
 
 static cl::opt<bool>
@@ -75,6 +76,13 @@ static cl::opt<bool, true>
 EnableSilhouetteShadowStack("enable-arm-silhouette-shadowstack",
                             cl::desc("Enable Silhouette shadow stack pass"),
                             cl::location(SilhouetteShadowStack),
+                            cl::init(false), cl::Hidden);
+
+bool SilhouetteInstrScanner;
+static cl::opt<bool, true>
+EnableSilhouetteInstrScanner("enable-arm-silhouette-instr-scanner",
+                            cl::desc("Enable Silhouette instruction scanner pass"),
+                            cl::location(SilhouetteInstrScanner),
                             cl::init(false), cl::Hidden);
 
 // FIXME: Unify control over GlobalMerge.
@@ -576,6 +584,10 @@ void ARMPassConfig::addPreEmitPass() {
 
   if (EnableSilhouetteShadowStack) {
     addPass(createARMSilhouetteShadowStack());
+  }
+
+  if (EnableSilhouetteInstrScanner) {
+    addPass(createARMSilhouetteInstrScanner());
   }
 
   addPass(createARMConstantIslandPass());

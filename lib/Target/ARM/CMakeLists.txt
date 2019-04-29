@@ -63,6 +63,7 @@ add_llvm_target(ARMCodeGen
   ARMSilhouetteSTR2STRT.cpp
   ARMSilhouetteMemOverhead.cpp
   ARMSilhouetteShadowStack.cpp
+  ARMSilhouetteInstrScanner.cpp
   ${GLOBAL_ISEL_BUILD_FILES}
   )
 
