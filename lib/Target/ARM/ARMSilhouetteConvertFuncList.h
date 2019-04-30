@@ -106,4 +106,6 @@ const static std::set<std::string> funcBlacklist {
         "TIM_Base_SetConfig",        // called by HAL_TIM_Base_Init
       "HAL_TIM_Base_Start_IT",       // called by HAL_InitTick
     "HAL_MspInit",                   // called by HAL_Init
+    "TIM_SlaveTimer_SetConfig",      // called by HAL_TIM_SlaveConfigSynchronization
+    "RCCEx_GetSAIxPeriphCLKFreq",
 };

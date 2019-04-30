@@ -250,6 +250,45 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
   
 }
 
+//
+// Method: rebuildPopInstr
+//
+// Description:
+//   This method builds a store instruction after given MachineInstr.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   spillReg - The register that needs to be spilled to shadow stack.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Return:
+//   None
+//
+static MachineInstr *rebuildPopInstr(MachineBasicBlock &MBB,
+                      MachineInstr *MI,
+                      DebugLoc &DL,
+                      const TargetInstrInfo *TII) {
+  // t2STRi12 only support immediate within range 0 <= imm <= 4095
+  // so imm is not within this range, add it to SP first, and subtract it after store. 
+  // errs() << "Imm: " << imm << "\n";
+  // if ((imm <= 1020) && (imm > 0) && (imm % 4 == 0)){
+  //   return BuildMI(MBB, MI, DL, TII->get(ARM::tSTRspi)).addReg(spillReg).addImm(imm);
+  // } else 
+  MachineInstrBuilder MIB = BuildMI(MBB, MBB.end(), DL, TII->get(MI->getOpcode()));
+  for (MachineOperand MO : MI->operands()){
+    if (MO.isReg() && MO.getReg() == ARM::PC){
+
+    } else{
+      MIB.addOperand(MO);
+    }
+  }
+  MIB.getInstr()->setFlags(MI->getFlags());
+  return MIB.getInstr();
+}
+
 
 
 //
@@ -290,10 +329,14 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
 
   const TargetInstrInfo *TII = MF.getSubtarget<ARMSubtarget>().getInstrInfo();
   DebugLoc DL;
+  MachineInstr *pop_orig = NULL;
 
   // iterate over all MachineInstr
   for (MachineBasicBlock &MBB : MF) {
     std::vector<MachineInstr *> originalStores; // Need delete the original stores.
+    // errs() << "MBB: ";
+    // MBB.print(errs());
+    // errs() << "\n";
     for (MachineInstr &MI : MBB) {
       unsigned opcode = MI.getOpcode();
       unsigned sourceReg = 0;
@@ -306,6 +349,9 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
         // A 7.7.157: STMDB writing to SP! is treated the same as PUSH
         case ARM::t2STMDB:
         case ARM::tPUSH:
+          // errs() << "PUSH found: ";
+          // MI.print(errs());
+          // errs() << "\n";
           // If this instruction is not prolog/epilog, then we don't care
           if (!MI.getFlag(MachineInstr::FrameSetup)){
             break;
@@ -337,15 +383,33 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 errs() << "Found PC: ";
                 MI.print(errs());
                 errs() << "\n";
+                MachineInstr* newMI = rebuildPopInstr(MBB, &MI, DL, TII);
+                AddDefaultPred(BuildMI(MBB, MBB.end(), DL, TII->get(ARM::tADDspi), ARM::SP).addReg(ARM::SP).addImm(1));
+                MachineInstr* ldrMI = buildLdrSSInstr(MBB, NULL, MO.getReg(), imm - 4, DL, TII);
+
+                // AddDefaultPred(BuildMI(MBB, &MI, DL, TII->get(ARM::t2ADDri), ARM::SP).addReg(ARM::SP).addImm(4));
+                // MI.eraseFromParent();
+                pop_orig = &MI;
+                break;
                 // need to subtract imm by 4 because pc is popped already, so SP - 4 is the pc in shadow stack
-                buildLdrSSInstr(MBB, NULL, MO.getReg(), imm - 4, DL, TII);
+                
+                // MachineInstr* ldrMI = buildLdrSSInstr(MBB, NULL, MO.getReg(), imm - 4, DL, TII);
+              } else {
               }
             }
           }
+        default:
+          break;
+          // errs() << "MI: ";
+          // MI.print(errs());
+          // errs() << "\n";
       }
     } 
   }
-
+  if (pop_orig != NULL){
+    pop_orig->eraseFromParent();
+  }
+  errs() << "Silhouette SS: end of function " << funcName << "\n";
 
   // This pass modifies the program.
   return true;
