@@ -282,7 +282,7 @@ bool ARMSilhouetteInstrScanner::runOnMachineFunction(MachineFunction &MF) {
 #endif
 
   // for debugging
-  errs() << "Silhouette SS: hello from function: " << funcName << "\n";
+  errs() << "LL: hello from function: " << funcName << "\n";
 
   // Compute the code size of the original machine function.
   unsigned codeSize = getFuncCodeSize(MF); 
@@ -306,6 +306,8 @@ bool ARMSilhouetteInstrScanner::runOnMachineFunction(MachineFunction &MF) {
       switch (opcode) {
         //
         case ARM::t2MSR_M:
+          errs() << "LL:GOOD:found one MSR\n";
+          
           for (MachineOperand &MO : MI.operands()){
             if (MO.isReg()){
               switch (MO.getReg()){
