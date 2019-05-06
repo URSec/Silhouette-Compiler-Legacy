@@ -15,6 +15,7 @@
 #include "ARMSubtarget.h"
 #include "ARMTargetObjectFile.h"
 #include "ARMTargetTransformInfo.h"
+#include "ARMSilhouetteCFI.h"
 #include "ARMSilhouetteMemOverhead.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
@@ -86,6 +87,12 @@ EnableSilhouetteMemOverhead("enable-arm-silhouette-mem-overhead",
                             cl::location(SilhouetteMemOverhead),
                             cl::init(false), cl::Hidden);
 
+bool SilhouetteCFI;
+static cl::opt<bool, true>
+EnableSilhouetteCFI("enable-arm-silhouette-cfi",
+                    cl::desc("Enable Silhouette CFI pass"),
+                    cl::location(SilhouetteCFI),
+                    cl::init(false), cl::Hidden);
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -558,6 +565,9 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMSilhouetteMemOverhead());
   }
 
-  addPass(createARMConstantIslandPass());
+  if (EnableSilhouetteCFI) {
+    addPass(createARMSilhouetteCFI());
+  }
 
+  addPass(createARMConstantIslandPass());
 }
