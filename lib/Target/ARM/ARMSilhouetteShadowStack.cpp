@@ -476,7 +476,10 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // If this instruction is inside IT block, add IT instruction 
                 // for the next 3 instructions: POP, ADD, LDR. 
                 if (!ITconds.empty()){
-                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(2);
+                  unsigned firstcondLSB = (MI.getOperand(0).getImm()) & 0x00000001;
+                  unsigned mask = 2;
+                  mask = mask | (firstcondLSB << 3) | (firstcondLSB << 2);
+                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask);
                   ITconds.erase(ITconds.begin());
                 }
                 errs() << "Found PC: ";
@@ -558,6 +561,8 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
               if (hasPOP)
                 break;
             }
+            if (condMI->isDebugValue())
+              i++;
           }
           // Split IT instruction to multiple IT instructions.
           // Save new condition to ITconds, apply them for next few instructions
@@ -580,9 +585,11 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
         default:
           // Although we don't care about other instructions, 
           // we still need to add IT instructions accordingly
-          if (!ITconds.empty()){
-            BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(8);
-            ITconds.erase(ITconds.begin());
+          if (!MI.isDebugValue()){
+            if (!ITconds.empty()){
+              BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(8);
+              ITconds.erase(ITconds.begin());
+            }
           }
           break;
       }
@@ -593,6 +600,22 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
     }
   }
   errs() << "Silhouette SS: end of function " << funcName << "\n";
+
+  // Compute the code size of the transformed machine function.
+  codeSizeNew = getFuncCodeSize(MF);
+
+  // Write the result to a file.
+  // The code size string is very small (funcName + original_code_size +
+  // new_code_size); raw_fd_ostream's "<<" operator ensures that the write is 
+  // atomic because essentially it uses write() to write to a file and according
+  // to http://man7.org/linux/man-pages/man7/pipe.7.html, any write with less
+  // than PIPE_BUF bytes (at least 4096) is guaranteed to be atomic.
+  std::error_code EC;
+  StringRef memStatFile("./code_size_ss.stat");
+  raw_fd_ostream memStat(memStatFile, EC, sys::fs::OpenFlags::F_Append);
+  std::string funcCodeSize = funcName.str() + ":" + std::to_string(codeSize) \
+    + ":" + std::to_string(codeSizeNew) + "\n";
+  memStat << funcCodeSize;
 
   // This pass modifies the program.
   return true;
