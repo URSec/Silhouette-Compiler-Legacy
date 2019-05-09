@@ -566,6 +566,11 @@ void ARMPassConfig::addPreEmitPass() {
   addPass(createARMLowOverheadLoopsPass());
 
   // Add Silhouette passes.
+
+  if (EnableSilhouetteShadowStack) {
+    addPass(createARMSilhouetteShadowStack());
+  }
+  
   if (EnableSilhouetteStr2Strt) {
     addPass(createARMSilhouetteSTR2STRT());
   }
@@ -576,10 +581,6 @@ void ARMPassConfig::addPreEmitPass() {
 
   if (EnableSilhouetteCFI) {
     addPass(createARMSilhouetteLabelCFI());
-  }
-
-  if (EnableSilhouetteShadowStack) {
-    addPass(createARMSilhouetteShadowStack());
   }
 
   addPass(createARMConstantIslandPass());
