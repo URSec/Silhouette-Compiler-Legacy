@@ -269,8 +269,7 @@ static MachineInstr *buildUnprivStr(MachineBasicBlock &MBB,
                       unsigned newOpcode,
                       DebugLoc &DL,
                       const TargetInstrInfo *TII) {
-  return BuildMI(MBB, MI, DL, TII->get(newOpcode))
-          .addReg(sourceReg)
+  return BuildMI(MBB, MI, DL, TII->get(newOpcode), sourceReg)
           .addReg(baseReg)
           .addImm(imm).operator->();
 }
@@ -763,6 +762,8 @@ static void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 //   isSinglePrecision - Indicate if it is a single-precision or double-precision store.
 //   DL - A reference to the DebugLoc structure.
 //   TII - A pointer to the TargetInstrInfo structure.
+//   calledByOtherConverter - Whether this function is called by another store
+//   conversion function.
 //
 // Outputs:
 //   One or more unprivileged stores, one extra push, and one extra pop.
@@ -788,11 +789,7 @@ static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
     unsigned interimReg = baseReg == R0 ? R1 : R0;
     
     // Second, store the selected register onto the stack.
-    newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tSUBspi), SP)
-      .addReg(SP).addImm(1)
-      .operator->());
-    newInstrs.push_back(
-        buildUnprivStr(MBB, MI, interimReg, SP, 0, ARM::t2STRT, DL, TII));
+    backupReg(MBB, MI, interimReg, newInstrs, TII);
 
     // Don't forget this.
     if (baseReg == SP) imm += 4;
@@ -1353,7 +1350,10 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #if 1
           sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
-          imm = (MI.getOperand(2).getImm()) << 2;
+          // For negative imm, LLVM encodes it as a positive here. 
+          // We need use 2^8 - imm to get the real immediate.
+          imm = MI.getOperand(2).getImm();
+          imm = imm >= 256 ? ((256 - imm) << 2) : (imm << 2);
           convertVSTR(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::VSTRS, DL, TII);
           originalStores.push_back(&MI);
 #endif
