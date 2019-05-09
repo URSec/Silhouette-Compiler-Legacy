@@ -396,7 +396,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
 #endif
 
   // for debugging
-  errs() << "Silhouette SS: hello from function: " << funcName << "\n";
+  // errs() << "Silhouette SS: hello from function: " << funcName << "\n";
 
   // Compute the code size of the original machine function.
   unsigned codeSize = getFuncCodeSize(MF); 
@@ -602,7 +602,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
       MI->eraseFromParent();
     }
   }
-  errs() << "Silhouette SS: end of function " << funcName << "\n";
+  // errs() << "Silhouette SS: end of function " << funcName << "\n";
 
   // Compute the code size of the transformed machine function.
   codeSizeNew = getFuncCodeSize(MF);
