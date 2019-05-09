@@ -485,9 +485,9 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                   BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
                   ITconds.erase(ITconds.begin());
                 }
-                errs() << "Found PC: ";
-                MI.print(errs());
-                errs() << "\n";
+                // errs() << "Found PC: ";
+                // MI.print(errs());
+                // errs() << "\n";
                 // Build LDR instruction
                 MachineInstr* ldrMI = buildLdrSSInstr(MBB, &MI, MO.getReg(), imm - 4, DL, TII, additional_operands);
                 // Build ADD instruction to add SP since we don't pop PC anymore. Add it before LDR instruction
@@ -503,9 +503,9 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                   }
                 }
                 
-                errs() << "New MI: ";
-                ldrMI->print(errs());
-                errs() << "\r\n";
+                // errs() << "New MI: ";
+                // ldrMI->print(errs());
+                // errs() << "\r\n";
                 originalStores.push_back(&MI);
                 break;
               } 
@@ -526,7 +526,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // IT (If-then) Instruction needs special handling.
           // Same idea as splitITBlockWithSTR() function in ARMSilhouetteSTR2STRT.cpp
           assert(ITconds.empty() && "Nested IT Instruction");
-          errs() << "IT instruction!\r\n";
+          // errs() << "IT instruction!\r\n";
           unsigned numCondInstr;
           unsigned firstcond = MI.getOperand(0).getImm();
           // Refer to ARM manual for mask format
