@@ -62,7 +62,7 @@ BackupRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
   //
   // sub  sp, #8
   // strt reg1, [sp, #0]
-  // strt reg1, [sp, #4]
+  // strt reg2, [sp, #4]
   //
   AddDefaultPred(
     BuildMI(MBB, &MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
@@ -112,11 +112,7 @@ RestoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
 //
 void
 ARMSilhouetteLabelCFI::insertCFILabel(MachineFunction & MF) {
-  auto MBB = MF.begin();
-
-  if (MBB != MF.end()) {
-    insertCFILabel(*MBB);
-  }
+  insertCFILabel(*MF.begin());
 }
 
 //
@@ -167,7 +163,7 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   // movw  scratch1, #CFI_LABEL
   // ldrh  scratch2, [reg, #0]
   // cmp   scratch1, scratch2
-  // ite   ne
+  // it    ne
   // bfcne reg, #0, #32
   // orr   reg, reg, #1         ; optional
   //
@@ -302,11 +298,15 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   const Function * F = MF.getFunction();
   if ((!F->hasInternalLinkage() && !F->hasPrivateLinkage()) ||
       F->hasAddressTaken()) {
-    insertCFILabel(MF);
+    if (MF.begin() != MF.end()) {
+      insertCFILabel(MF);
+    }
   }
 #else
   // Insert a CFI label before the function
-  insertCFILabel(MF);
+  if (MF.begin() != MF.end()) {
+    insertCFILabel(MF);
+  }
 #endif
 
   //
