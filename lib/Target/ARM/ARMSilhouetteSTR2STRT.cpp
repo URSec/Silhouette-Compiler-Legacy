@@ -1244,6 +1244,10 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
       int64_t imm = 0;
       unsigned newOpcode = getNewOpcode(opcode);
 
+      // Don't do anything to Shadow Stack instructions
+      if (MI.getFlag(MachineInstr::ShadowStack))
+        continue;
+
       switch (opcode) {
         // Integer stores.
         //

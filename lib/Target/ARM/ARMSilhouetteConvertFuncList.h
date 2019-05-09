@@ -108,4 +108,5 @@ const static std::set<std::string> funcBlacklist {
     "HAL_MspInit",                   // called by HAL_Init
     "TIM_SlaveTimer_SetConfig",      // called by HAL_TIM_SlaveConfigSynchronization
     "RCCEx_GetSAIxPeriphCLKFreq",
+    "initMPU",
 };
