@@ -107,6 +107,8 @@ public:
                                         // known to be exact.
     FPExcept     = 1 << 14,             // Instruction may raise floating-point
                                         // exceptions.
+    ShadowStack  = 1 << 15,             // Silhouette: Instruction is part of
+                                        // shadow stack
   };
 
 private:
