@@ -36,8 +36,9 @@
 #include "llvm/Transforms/Scalar.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteMemOverhead.h"
-#include "ARMSilhouetteCFI.h"
+#include "ARMSilhouetteLabelCFI.h"
 #include "ARMSilhouetteShadowStack.h"
+
 using namespace llvm;
 
 static cl::opt<bool>
@@ -582,7 +583,7 @@ void ARMPassConfig::addPreEmitPass() {
   }
 
   if (EnableSilhouetteCFI) {
-    addPass(createARMSilhouetteCFI());
+    addPass(createARMSilhouetteLabelCFI());
   }
   if (EnableSilhouetteShadowStack) {
     addPass(createARMSilhouetteShadowStack());
