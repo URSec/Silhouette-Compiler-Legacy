@@ -48,6 +48,7 @@ add_llvm_target(ARMCodeGen
   ARMRegisterBankInfo.cpp
   ARMSelectionDAGInfo.cpp
   ARMSilhouetteCFI.cpp
+  ARMSilhouetteLabelCFI.cpp
   ARMSilhouetteMemOverhead.cpp
   ARMSilhouetteSTR2STRT.cpp
   ARMSilhouetteShadowStack.cpp

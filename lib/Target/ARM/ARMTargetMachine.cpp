@@ -16,6 +16,7 @@
 #include "ARMTargetObjectFile.h"
 #include "ARMTargetTransformInfo.h"
 #include "ARMSilhouetteCFI.h"
+#include "ARMSilhouetteLabelCFI.h"
 #include "ARMSilhouetteMemOverhead.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteShadowStack.h"
@@ -574,7 +575,7 @@ void ARMPassConfig::addPreEmitPass() {
   }
 
   if (EnableSilhouetteCFI) {
-    addPass(createARMSilhouetteCFI());
+    addPass(createARMSilhouetteLabelCFI());
   }
 
   if (EnableSilhouetteShadowStack) {
