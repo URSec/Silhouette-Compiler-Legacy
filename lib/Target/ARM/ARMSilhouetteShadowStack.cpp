@@ -395,8 +395,10 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
   if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
 #endif
 
+#if 0
   // for debugging
-  // errs() << "Silhouette SS: hello from function: " << funcName << "\n";
+  errs() << "Silhouette SS: hello from function: " << funcName << "\n";
+#endif
 
   // Compute the code size of the original machine function.
   unsigned codeSize = getFuncCodeSize(MF); 
