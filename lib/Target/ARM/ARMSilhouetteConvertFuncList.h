@@ -65,6 +65,9 @@ const static std::set<std::string> funcWhitelist = {
   "initialise_benchmark",
   "benchmark",
   "verify_benchmark",
+  // aha-compress
+  "compress3",
+  "compress4",
   // cnt
   "Test",
   "Initialize",
@@ -115,9 +118,10 @@ const static std::set<std::string> funcBlacklist {
     // "HAL_GPIO_Init",
     // "BSP_COM_Init",
     // "HAL_UART_Transmit",
-        // "HAL_UART_Init",
+    //     "HAL_UART_Init",
     "HAL_TIM_IRQHandler",            // Timer interrupt handler
     "SysTick_Handler",               // Timer related handler
     "UART_CheckIdleState",           // Timer related function
     "UART_AdvFeatureConfig",         // Timer related function
+    "UART_SetConfig",                // Timer related function
 };
