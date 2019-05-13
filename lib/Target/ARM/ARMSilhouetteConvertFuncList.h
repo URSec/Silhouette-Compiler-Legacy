@@ -61,7 +61,10 @@ const static std::set<std::string> funcWhitelist = {
 
   // BEEBS benchmark
 #if 1
+  "main",
+  "initialise_benchmark",
   "benchmark",
+  "verify_benchmark",
   // cnt
   "Test",
   "Initialize",
@@ -109,4 +112,12 @@ const static std::set<std::string> funcBlacklist {
     "TIM_SlaveTimer_SetConfig",      // called by HAL_TIM_SlaveConfigSynchronization
     "RCCEx_GetSAIxPeriphCLKFreq",
     "initMPU",
+    // "HAL_GPIO_Init",
+    // "BSP_COM_Init",
+    // "HAL_UART_Transmit",
+        // "HAL_UART_Init",
+    "HAL_TIM_IRQHandler",            // Timer interrupt handler
+    "SysTick_Handler",               // Timer related handler
+    "UART_CheckIdleState",           // Timer related function
+    "UART_AdvFeatureConfig",         // Timer related function
 };

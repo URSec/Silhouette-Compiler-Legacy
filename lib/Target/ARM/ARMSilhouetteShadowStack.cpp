@@ -207,13 +207,15 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
   if ((imm < 4096) && (imm >= 0)){
     // Insert new LDR instruction
     MachineInstrBuilder MIB;
-    if (MI->getOpcode() == ARM::tPOP_RET || MI->getOpcode() == ARM::tPOP || MI->getOpcode() == ARM::t2LDMIA_RET){
+    if (MI->getOpcode() == ARM::tPOP_RET || MI->getOpcode() == ARM::tPOP || MI->getOpcode() == ARM::t2LDMIA_RET || MI->getOpcode() == ARM::t2LDMIA_UPD){
       MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
       // Add predicates of original POP to new LDR instruction
       for (MachineOperand* MO : extra_operands){
         MIB.addOperand(*MO);
       }
-    } else{
+    } 
+#if 0
+    else{
       MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
       // Add predicates of original POP to new LDR instruction, but do not kill predicate register
       // because later instructions also depends on them. 
@@ -225,6 +227,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
         }
       }
     }
+#endif
     MIB.setMIFlag(MachineInstr::ShadowStack);
     return MIB.getInstr();
   } else {
@@ -337,25 +340,38 @@ static MachineInstr *rebuildPopInstr(MachineBasicBlock &MBB,
                       std::vector<MachineOperand*> extra_operands,
                       MachineInstr *MI_order) {
   // Generate new instruction
-  MachineInstrBuilder MIB = BuildMI(MBB, MI_order, DL, TII->get(MI->getOpcode()));
+  MachineInstrBuilder MIB;
+  if (MI->getOpcode() == ARM::t2LDMIA_UPD)
+    MIB = BuildMI(MBB, MI_order, DL, TII->get(MI->getOpcode()), ARM::SP).addReg(ARM::SP);
+  else
+    MIB = BuildMI(MBB, MI_order, DL, TII->get(MI->getOpcode()));
   unsigned i;
   // Add predicate of original instruction to new instruction, but 
   // remove the Kill flag to register as they are still needed for 
   // LDR instruction afterward. 
-  for (MachineOperand* MO : extra_operands){
-    if (MO->isReg()){
-      MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
-    } else{
-      MIB.addOperand(*MO);
+  if (MI->getOpcode() != ARM::t2LDMIA_UPD){
+    for (MachineOperand* MO : extra_operands){
+      if (MO->isReg()){
+        MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
+      } else{
+        MIB.addOperand(*MO);
+      }
     }
   }
   // Add operands of original instruction to new instruction except for
   // PC register. 
   for (i = 2; i < MI->getNumOperands(); i++){
     MachineOperand MO = MI->getOperand(i);
-    if (MO.isReg() && MO.getReg() == ARM::PC){
-
-    } else{
+    if (MO.isReg()){
+      if (MI->getOpcode() == ARM::t2LDMIA_UPD){
+        if (MO.getReg() != ARM::LR)
+          MIB.addOperand(MO);
+      }
+      else {
+        if (MO.getReg() != ARM::PC)
+          MIB.addOperand(MO);
+      }
+    } else {
       MIB.addOperand(MO);
     }
   }
@@ -461,6 +477,66 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           break;
         }
         // A 7.7.40: LDMIA writing to SP! is treated the same as POP
+        // LLVM seems to use LDMIA when popping return address to 
+        // LR itself (for example: return foo();)
+        case ARM::t2LDMIA_UPD:{
+          bool hasLR = false; // LDMIA instruction may not contain PC reg
+          MCInstrDesc MIdesc = MI.getDesc();
+          int pred;
+          // Save predicates of original LDMIA instruction
+          for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MI.getNumOperands(); pred++){
+            if (MIdesc.OpInfo[pred].isPredicate()){
+              // errs() << "predicate index: " << pred << "\r\n";
+              additional_operands.push_back(&MI.getOperand(pred));
+            }
+          }
+          for (MachineOperand &MO : MI.operands()){
+            if (MO.isReg()){
+              if (MO.getReg() == ARM::LR){
+                hasLR = true;
+                // If this instruction is inside IT block, add IT instruction 
+                // for the next 3 instructions: LDMIA, ADD, LDR. 
+                if (!ITconds.empty()){
+                  unsigned firstcondLSB = (MI.getOperand(0).getImm()) & 0x00000001;
+                  unsigned mask = 2;
+                  mask = mask | (firstcondLSB << 3) | (firstcondLSB << 2);
+                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
+                  ITconds.erase(ITconds.begin());
+                }
+                // Build LDR instruction
+                MachineInstr* ldrMI = buildLdrSSInstr(MBB, &MI, MO.getReg(), imm - 4, DL, TII, additional_operands);
+                // Build ADD instruction to add SP since we don't pop PC anymore. Add it before LDR instruction
+                MachineInstrBuilder addSP = BuildMI(MBB, ldrMI, DL, TII->get(ARM::tADDspi), ARM::SP).addReg(ARM::SP).addImm(1).setMIFlag(MachineInstr::ShadowStack);
+                // Build POP instruction that does not contain PC. Add it before ADD instruction. 
+                MachineInstr* newMI = rebuildPopInstr(MBB, &MI, DL, TII, additional_operands, addSP.getInstr());
+                // Add original predicates to ADD instruction but remove Kill flag for registers
+                for (MachineOperand* MO : additional_operands){
+                  if (MO->isReg()){
+                    addSP.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
+                  } else{
+                    addSP.addOperand(*MO);
+                  }
+                }
+                
+                // errs() << "New MI: ";
+                // ldrMI->print(errs());
+                // errs() << "\r\n";
+                originalStores.push_back(&MI);
+                break;
+              } 
+            } else {
+            }
+          }
+          // If it does not contain PC, but it is inside IT block, 
+          // we still need to add IT instruction
+          if (!hasLR){
+            if (!ITconds.empty()){
+              BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(8);
+              ITconds.erase(ITconds.begin());
+            }
+          }
+          break;
+        } 
         case ARM::t2LDMIA_RET:
         case ARM::tPOP_RET:
         case ARM::tPOP:{
