@@ -1428,7 +1428,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
   // to http://man7.org/linux/man-pages/man7/pipe.7.html, any write with less
   // than PIPE_BUF bytes (at least 4096) is guaranteed to be atomic.
   std::error_code EC;
-  StringRef memStatFile("./code_size.stat");
+  StringRef memStatFile("./code_size_sp.stat");
   raw_fd_ostream memStat(memStatFile, EC, sys::fs::OpenFlags::F_Append);
   std::string funcCodeSize = funcName.str() + ":" + std::to_string(codeSize) \
     + ":" + std::to_string(codeSizeNew) + "\n";
