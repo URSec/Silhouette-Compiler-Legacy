@@ -21,6 +21,8 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FileSystem.h"
 
 #include <vector>
 
@@ -99,6 +101,31 @@ RestoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
   AddDefaultPred(BuildMI(MBB, &MI, DL, TII->get(ARM::tPOP)))
   .addReg(Reg1)
   .addReg(Reg2);
+}
+
+//
+// Function: GetFuncCodeSize()
+//
+// Description:
+//   This function computes the code size of a machine function.
+//
+// Input:
+//   MF - A reference to the target machine function.
+//
+// Return value:
+//   The size (in bytes) of the machine function.
+//
+static unsigned long
+GetFuncCodeSize(MachineFunction & MF) {
+  const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
+  unsigned long codeSize = 0ul;
+  for (MachineBasicBlock & MBB : MF) {
+    for (MachineInstr & MI : MBB) {
+      codeSize += TII->getInstSizeInBytes(MI);
+    }
+  }
+
+  return codeSize;
 }
 
 //
@@ -239,11 +266,14 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
+  unsigned long OldCodeSize = GetFuncCodeSize(MF);
+
   //
   // Iterate through all the instructions within the function to locate
   // indirect branches and calls.
   //
   std::vector<MachineInstr *> IndirectBranches;
+  std::vector<MachineInstr *> JTJs;
   for (MachineBasicBlock & MBB : MF) {
     for (MachineInstr & MI : MBB) {
       switch (MI.getOpcode()) {
@@ -266,6 +296,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
       case ARM::t2BR_JT:    // 0: GPR, 1: GPR, 2: i32imm
       case ARM::t2TBB_JT:   // 0: GPR, 1: GPR, 2: i32imm, 3: i32imm
       case ARM::t2TBH_JT:   // 0: GPR, 1: GPR, 2: i32imm, 3: i32imm
+        JTJs.push_back(&MI);
         break;
 
       //
@@ -337,6 +368,21 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
     default:
       llvm_unreachable("Unexpected opcode");
     }
+  }
+
+  unsigned long NewCodeSize = GetFuncCodeSize(MF);
+
+  // Output code size information
+  std::error_code EC;
+  raw_fd_ostream MemStat("./code_size_cfi.stat", EC,
+                         sys::fs::OpenFlags::F_Append);
+  MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
+
+  // Output jump table jump information
+  raw_fd_ostream JTJStat("./jump_table_jump.stat", EC,
+                         sys::fs::OpenFlags::F_Append);
+  for (MachineInstr * MI : JTJs) {
+    JTJStat << MF.getName() << "\n";
   }
 
   return true;
