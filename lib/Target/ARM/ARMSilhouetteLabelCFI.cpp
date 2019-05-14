@@ -259,7 +259,7 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
 //
 bool
 ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
-#if 0
+#if 1
   // Skip certain functions
   if (funcBlacklist.find(MF.getName()) != funcBlacklist.end()) {
     return false;
