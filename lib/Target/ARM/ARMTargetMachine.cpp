@@ -575,10 +575,6 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMSilhouetteSTR2STRT());
   }
 
-  if (EnableSilhouetteMemOverhead) {
-    addPass(createARMSilhouetteMemOverhead());
-  }
-
   if (EnableSilhouetteCFI) {
     addPass(createARMSilhouetteLabelCFI());
   }
