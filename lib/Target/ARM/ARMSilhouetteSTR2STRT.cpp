@@ -770,7 +770,7 @@ static void convertSTRReg(MachineBasicBlock &MBB, MachineInstr *MI,
 //
 static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
                            MachineInstr *MI,
-                           unsigned sourceReg, unsigned baseReg, uint16_t imm,
+                           unsigned sourceReg, unsigned baseReg, int imm,
                            bool isSinglePrecision,
                            DebugLoc &DL, const TargetInstrInfo *TII,
                            bool calledByOtherConverter = false) {
