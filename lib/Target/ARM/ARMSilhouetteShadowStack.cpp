@@ -405,6 +405,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
   StringRef funcName = MF.getName();
   // skip certain functions
   if (funcBlacklist.find(funcName) != funcBlacklist.end()) return false;
+  // if (funcWhitelist.find(funcName) == funcWhitelist.end()) return false;
 
 #if 0
   // instrument certain functions
@@ -642,6 +643,17 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
               if (hasPOP)
                 break;
             }
+            if (condMI->getOpcode() == ARM::t2LDMIA_UPD){
+              for (MachineOperand MO : condMI->operands()){
+                if (MO.isReg() && MO.getReg() == ARM::LR){
+                  assert(SHADOW_STACK_OFFSET <= 4096 && SHADOW_STACK_OFFSET >= 0 && "Shadow Stack offset cannot be larger than 4096");
+                  hasPOP = true;
+                  break;
+                }
+              }
+              if (hasPOP)
+                break;
+            }
             if (condMI->isDebugValue())
               i++;
           }
@@ -664,6 +676,13 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           break;
         }
         default:
+          if (MI.mayLoad()){
+            for (MachineOperand MO : MI.operands()){
+              if (MO.isReg()){
+                assert((MO.getReg() != ARM::PC) && "Silhouette SS: Missed Load to PC\r\n");
+              }
+            }
+          }
           // Although we don't care about other instructions, 
           // we still need to add IT instructions accordingly
           if (!MI.isDebugValue()){
