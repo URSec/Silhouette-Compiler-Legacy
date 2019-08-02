@@ -144,9 +144,9 @@ static MachineInstr *buildStrSSInstr(MachineBasicBlock &MBB,
   // negative offset or offset larger than 4095 is not supported anymore.  
   // t2STRi12 only support immediate within range 0 <= imm <= 4095
   // so imm is not within this range, add it to SP first, and subtract it after store. 
-  if ((imm < 4096) && (imm >= 0)){
+  if ((imm < 256) && (imm >= 0)){
     // Insert new STR instruction
-    return AddDefaultPred(BuildMI(MBB, MI, DL, TII->get(ARM::t2STRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm)).setMIFlag(MachineInstr::ShadowStack);
+    return AddDefaultPred(BuildMI(MBB, MI, DL, TII->get(ARM::t2STRT)).addReg(spillReg).addReg(ARM::SP).addImm(imm)).setMIFlag(MachineInstr::ShadowStack);
   } else {
     unsigned addOp = (imm >= 0) ? ARM::t2ADDri12 : ARM::t2SUBri12;
     unsigned subOp = (imm >= 0) ? ARM::t2SUBri12 : ARM::t2ADDri12;
@@ -155,6 +155,10 @@ static MachineInstr *buildStrSSInstr(MachineBasicBlock &MBB,
     while (imm_left > 4095){
       subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
+    }
+    while (imm_left > 255){
+      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      imm_left = 0;
     }
     if (imm < 0){
       subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
@@ -166,6 +170,10 @@ static MachineInstr *buildStrSSInstr(MachineBasicBlock &MBB,
     while (imm_left > 4095){
       addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
+    }
+    while (imm_left > 255){
+      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      imm_left = 0;
     }
     if (imm < 0){
       addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
@@ -259,6 +267,29 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       subInstr = MIB.getInstr();
       imm_left -= 4095;
     }
+    while (imm_left > 255){
+      MachineInstrBuilder MIB;
+      if (subInstr == NULL){
+        // if (MI == NULL){
+        //   MIB = BuildMI(MBB, MBB.end(), DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
+        // } else{
+        //   MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
+        // }
+        MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left);
+      } else{
+        MIB = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left);
+      }
+      for (MachineOperand* MO : extra_operands){
+        if (MO->isReg()){
+          MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
+        } else{
+          MIB.addOperand(*MO);
+        }
+      }
+      MIB.setMIFlag(MachineInstr::ShadowStack);
+      subInstr = MIB.getInstr();
+      imm_left = 0;
+    }
     // Add/subtract remaining amount to SP
     if (imm < 0){
       MachineInstrBuilder MIB;
@@ -287,6 +318,24 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       MachineInstrBuilder MIB = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
       if (imm_left < 4095 && imm_left >= 0){
+        for (MachineOperand* MO : extra_operands){
+          MIB.addOperand(*MO);
+        }
+      } else {
+        for (MachineOperand* MO : extra_operands){
+          if (MO->isReg()){
+            MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
+          } else{
+            MIB.addOperand(*MO);
+          }
+        }
+      }
+      addInstr = MIB.getInstr();
+    }
+    while (imm_left > 255){
+      MachineInstrBuilder MIB = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      imm_left = 0;
+      if (imm_left < 255 && imm_left >= 0){
         for (MachineOperand* MO : extra_operands){
           MIB.addOperand(*MO);
         }
