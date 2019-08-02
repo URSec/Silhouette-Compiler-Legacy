@@ -498,7 +498,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // If this instruction is inside IT block, add IT instruction 
                 // for the next 3 instructions: LDMIA, ADD, LDR. 
                 if (!ITconds.empty()){
-                  unsigned firstcondLSB = (MI.getOperand(0).getImm()) & 0x00000001;
+                  unsigned firstcondLSB = ITconds.front() & 0x00000001;
                   unsigned mask = 2;
                   mask = mask | (firstcondLSB << 3) | (firstcondLSB << 2);
                   BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
@@ -558,7 +558,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // If this instruction is inside IT block, add IT instruction 
                 // for the next 3 instructions: POP, ADD, LDR. 
                 if (!ITconds.empty()){
-                  unsigned firstcondLSB = (MI.getOperand(0).getImm()) & 0x00000001;
+                  unsigned firstcondLSB = ITconds.front() & 0x00000001;
                   unsigned mask = 2;
                   mask = mask | (firstcondLSB << 3) | (firstcondLSB << 2);
                   BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
