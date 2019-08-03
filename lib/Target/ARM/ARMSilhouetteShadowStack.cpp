@@ -140,43 +140,68 @@ static MachineInstr *buildStrSSInstr(MachineBasicBlock &MBB,
                       unsigned spillReg, int64_t imm,
                       DebugLoc &DL,
                       const TargetInstrInfo *TII) {
-  // NOTE: Due to difficulties with IT instructions, 
-  // negative offset or offset larger than 4095 is not supported anymore.  
-  // t2STRi12 only support immediate within range 0 <= imm <= 4095
-  // so imm is not within this range, add it to SP first, and subtract it after store. 
+  // t2STRT only support immediate within range 0 <= imm <= 255
+  // so imm is not within this range, add it to SP first,
+  // and subtract it after store. 
   if ((imm < 256) && (imm >= 0)){
     // Insert new STR instruction
-    return AddDefaultPred(BuildMI(MBB, MI, DL, TII->get(ARM::t2STRT)).addReg(spillReg).addReg(ARM::SP).addImm(imm)).setMIFlag(MachineInstr::ShadowStack);
+    return AddDefaultPred(BuildMI(MBB, MI, DL, TII->get(ARM::t2STRT)).addReg
+    (spillReg).addReg(ARM::SP).addImm(imm)).setMIFlag(MachineInstr::ShadowStack);
   } else {
+    // Restore SP after STRT instruction
+    // Decide instructions to use based on value of immediate
     unsigned addOp = (imm >= 0) ? ARM::t2ADDri12 : ARM::t2SUBri12;
     unsigned subOp = (imm >= 0) ? ARM::t2SUBri12 : ARM::t2ADDri12;
+    // Get the absolute value of immediate
     int64_t imm_left = (imm >= 0) ? imm : -imm;
     MachineInstr *subInstr = MI;
+    // Do big arithmetics to SP
     while (imm_left > 4095){
-      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
+      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), 
+      ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag
+      (MachineInstr::ShadowStack);
       imm_left -= 4095;
     }
+    // Do small arithmetic to SP so that imm fits STRT
     while (imm_left > 255){
-      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), 
+      ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag
+      (MachineInstr::ShadowStack);
       imm_left = 0;
     }
+    // If imm is negative, do additional arithmetic. See comment below
+    // for why this is needed
     if (imm < 0){
-      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), 
+      ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag
+      (MachineInstr::ShadowStack);
       imm_left = 0;
     }
+    // Generate STRT instruction
     MachineInstr *strInstr = buildStrSSInstr(MBB, subInstr, spillReg, imm_left, DL, TII);
+    // Do arithmetics to SP so that imm is in range of 0 <= imm <= 255
     imm_left = (imm >= 0) ? imm : -imm;
     MachineInstr *addInstr = strInstr;
+    // Do big arithmetics
     while (imm_left > 4095){
-      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
+      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), 
+      ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag
+      (MachineInstr::ShadowStack);
       imm_left -= 4095;
     }
+    // Do small arithmetic so that imm fits STRT
     while (imm_left > 255){
-      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), 
+      ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag
+      (MachineInstr::ShadowStack);
       imm_left = 0;
     }
+    // If imm is negative, do additional arithmetic to make imm 0 because
+    // imm cannot be negative for STRT
     if (imm < 0){
-      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), 
+      ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag
+      (MachineInstr::ShadowStack);
     }
     return strInstr;
   }
@@ -211,35 +236,24 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
   // NOTE: Due to difficulties with IT instructions, 
   // negative offset or offset larger than 4095 is not supported anymore. 
   // t2LDRi12 only support immediate within range 0 <= imm <= 4095
-  // so imm is not within this range, add it to SP first, and subtract it after load. 
+  // so imm is not within this range, add it to SP first, and subtract it after 
+  // load. 
   if ((imm < 4096) && (imm >= 0)){
     // Insert new LDR instruction
     MachineInstrBuilder MIB;
-    if (MI->getOpcode() == ARM::tPOP_RET || MI->getOpcode() == ARM::tPOP || MI->getOpcode() == ARM::t2LDMIA_RET || MI->getOpcode() == ARM::t2LDMIA_UPD){
-      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
+    if (MI->getOpcode() == ARM::tPOP_RET || MI->getOpcode() == ARM::tPOP || 
+    MI->getOpcode() == ARM::t2LDMIA_RET || MI->getOpcode() == ARM::t2LDMIA_UPD){
+      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg)
+      .addReg(ARM::SP).addImm(imm);
       // Add predicates of original POP to new LDR instruction
       for (MachineOperand* MO : extra_operands){
         MIB.addOperand(*MO);
       }
     } 
-#if 0
-    else{
-      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
-      // Add predicates of original POP to new LDR instruction, but do not kill predicate register
-      // because later instructions also depends on them. 
-      for (MachineOperand* MO : extra_operands){
-        if (MO->isReg()){
-          MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
-        } else{
-          MIB.addOperand(*MO);
-        }
-      }
-    }
-#endif
     MIB.setMIFlag(MachineInstr::ShadowStack);
     return MIB.getInstr();
   } else {
-    // Add/subtract SP to locate to shadow stack
+    // Restore SP from changes below
     unsigned addOp = (imm >= 0) ? ARM::t2ADDri12 : ARM::t2SUBri12;
     unsigned subOp = (imm >= 0) ? ARM::t2SUBri12 : ARM::t2ADDri12;
     int64_t imm_left = (imm >= 0) ? imm : -imm;
@@ -247,15 +261,13 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
     while (imm_left > 4095){
       MachineInstrBuilder MIB;
       if (subInstr == NULL){
-        // if (MI == NULL){
-        //   MIB = BuildMI(MBB, MBB.end(), DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
-        // } else{
-        //   MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
-        // }
-        MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
+        MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP)
+        .addImm(4095);
       } else{
-        MIB = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
+        MIB = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg
+        (ARM::SP).addImm(4095);
       }
+      // Add additional predicates to operands
       for (MachineOperand* MO : extra_operands){
         if (MO->isReg()){
           MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
@@ -267,36 +279,16 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       subInstr = MIB.getInstr();
       imm_left -= 4095;
     }
-    while (imm_left > 255){
-      MachineInstrBuilder MIB;
-      if (subInstr == NULL){
-        // if (MI == NULL){
-        //   MIB = BuildMI(MBB, MBB.end(), DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
-        // } else{
-        //   MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095);
-        // }
-        MIB = BuildMI(MBB, MI, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left);
-      } else{
-        MIB = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left);
-      }
-      for (MachineOperand* MO : extra_operands){
-        if (MO->isReg()){
-          MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
-        } else{
-          MIB.addOperand(*MO);
-        }
-      }
-      MIB.setMIFlag(MachineInstr::ShadowStack);
-      subInstr = MIB.getInstr();
-      imm_left = 0;
-    }
-    // Add/subtract remaining amount to SP
+    // If imm is negative, do additional arithmetic. See comment in
+    // buildStrSSInstr for details.
     if (imm < 0){
       MachineInstrBuilder MIB;
       if (subInstr == NULL){
-        MIB = BuildMI(MBB, MBB.end(), DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left);
+        MIB = BuildMI(MBB, MBB.end(), DL, TII->get(subOp), ARM::SP).addReg
+        (ARM::SP).addImm(imm_left);
       } else{
-        MIB = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left);
+        MIB = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg
+        (ARM::SP).addImm(imm_left);
       }
       for (MachineOperand* MO : extra_operands){
         if (MO->isReg()){
@@ -310,32 +302,15 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       imm_left = 0;
     }
     // Add actual load instruction
-    MachineInstr *strInstr = buildLdrSSInstr(MBB, subInstr, spillReg, imm_left, DL, TII, extra_operands);
-    // Revert changes to SP
+    MachineInstr *strInstr = buildLdrSSInstr(MBB, subInstr, spillReg, imm_left, 
+    DL, TII, extra_operands);
+    // Do arithmetics to SP to fit imm to the range of LDR instruction
     imm_left = (imm >= 0) ? imm : -imm;
     MachineInstr *addInstr = strInstr;
     while (imm_left > 4095){
       MachineInstrBuilder MIB = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
       if (imm_left < 4095 && imm_left >= 0){
-        for (MachineOperand* MO : extra_operands){
-          MIB.addOperand(*MO);
-        }
-      } else {
-        for (MachineOperand* MO : extra_operands){
-          if (MO->isReg()){
-            MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
-          } else{
-            MIB.addOperand(*MO);
-          }
-        }
-      }
-      addInstr = MIB.getInstr();
-    }
-    while (imm_left > 255){
-      MachineInstrBuilder MIB = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
-      imm_left = 0;
-      if (imm_left < 255 && imm_left >= 0){
         for (MachineOperand* MO : extra_operands){
           MIB.addOperand(*MO);
         }
@@ -506,7 +481,8 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // If this instruction is inside an IT block, add IT instruction
                 // for 2 instructions, STR and POP. 
                 if (!ITconds.empty()){
-                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(4);
+                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front
+                  ()).addImm(4);
                   ITconds.erase(ITconds.begin());
                 }
                 // Build STR instr
@@ -518,12 +494,11 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // we still need to add IT instruction
           if (!hasLR){
             if (!ITconds.empty()){
-              BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(8);
+              BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front())
+              .addImm(8);
               ITconds.erase(ITconds.begin());
             }
           }
-          // MI.print(errs());
-          // errs() << "\n";
           break;
         }
         // A 7.7.40: LDMIA writing to SP! is treated the same as POP
@@ -536,7 +511,6 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // Save predicates of original LDMIA instruction
           for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MI.getNumOperands(); pred++){
             if (MIdesc.OpInfo[pred].isPredicate()){
-              // errs() << "predicate index: " << pred << "\r\n";
               additional_operands.push_back(&MI.getOperand(pred));
             }
           }
@@ -567,10 +541,6 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                     addSP.addOperand(*MO);
                   }
                 }
-                
-                // errs() << "New MI: ";
-                // ldrMI->print(errs());
-                // errs() << "\r\n";
                 originalStores.push_back(&MI);
                 break;
               } 
@@ -596,7 +566,6 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // Save predicates of original POP instruction
           for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MI.getNumOperands(); pred++){
             if (MIdesc.OpInfo[pred].isPredicate()){
-              // errs() << "predicate index: " << pred << "\r\n";
               additional_operands.push_back(&MI.getOperand(pred));
             }
           }
@@ -613,9 +582,6 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                   BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
                   ITconds.erase(ITconds.begin());
                 }
-                // errs() << "Found PC: ";
-                // MI.print(errs());
-                // errs() << "\n";
                 // Build LDR instruction
                 MachineInstr* ldrMI = buildLdrSSInstr(MBB, &MI, MO.getReg(), imm - 4, DL, TII, additional_operands);
                 // Build ADD instruction to add SP since we don't pop PC anymore. Add it before LDR instruction
@@ -630,10 +596,6 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                     addSP.addOperand(*MO);
                   }
                 }
-                
-                // errs() << "New MI: ";
-                // ldrMI->print(errs());
-                // errs() << "\r\n";
                 originalStores.push_back(&MI);
                 break;
               } 
@@ -654,7 +616,6 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // IT (If-then) Instruction needs special handling.
           // Same idea as splitITBlockWithSTR() function in ARMSilhouetteSTR2STRT.cpp
           assert(ITconds.empty() && "Nested IT Instruction");
-          // errs() << "IT instruction!\r\n";
           unsigned numCondInstr;
           unsigned firstcond = MI.getOperand(0).getImm();
           // Refer to ARM manual for mask format
@@ -681,10 +642,8 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 condMI->getOpcode() == ARM::t2LDMIA_RET){
               for (MachineOperand MO : condMI->operands()){
                 if (MO.isReg() && MO.getReg() == ARM::PC){
-                  assert(SHADOW_STACK_OFFSET <= 4096 && SHADOW_STACK_OFFSET >= 0 && "Shadow Stack offset cannot be larger than 4096");
-                  // BuildMI(MBB, MI, DL, TII->get(ARM::t2IT))
-                  //   .addImm(firstcond).addImm(2);
-                  // originalStores.push_back(&MI);
+                  assert(SHADOW_STACK_OFFSET <= 4096 && SHADOW_STACK_OFFSET >= 
+                  0 && "Shadow Stack offset cannot be larger than 4096");
                   hasPOP = true;
                   break;
                 }
@@ -695,7 +654,8 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
             if (condMI->getOpcode() == ARM::t2LDMIA_UPD){
               for (MachineOperand MO : condMI->operands()){
                 if (MO.isReg() && MO.getReg() == ARM::LR){
-                  assert(SHADOW_STACK_OFFSET <= 4096 && SHADOW_STACK_OFFSET >= 0 && "Shadow Stack offset cannot be larger than 4096");
+                  assert(SHADOW_STACK_OFFSET <= 4096 && SHADOW_STACK_OFFSET >= 
+                  0 && "Shadow Stack offset cannot be larger than 4096");
                   hasPOP = true;
                   break;
                 }
@@ -748,8 +708,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
       MI->eraseFromParent();
     }
   }
-  // errs() << "Silhouette SS: end of function " << funcName << "\n";
-
+  
   // Compute the code size of the transformed machine function.
   codeSizeNew = getFuncCodeSize(MF);
 
