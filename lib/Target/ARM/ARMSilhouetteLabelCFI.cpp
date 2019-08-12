@@ -71,10 +71,10 @@ BackupRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
     .addReg(ARM::SP)
     .addImm(2)
   );
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg1)
+  BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRi12), Reg1)
   .addReg(ARM::SP)
   .addImm(0);
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg2)
+  BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRi12), Reg2)
   .addReg(ARM::SP)
   .addImm(4);
 }
