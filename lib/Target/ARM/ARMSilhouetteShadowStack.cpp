@@ -29,7 +29,7 @@
 
 using namespace llvm;
 
-#define SHADOW_STACK_OFFSET 3072
+#define SHADOW_STACK_OFFSET 4096
 
 // Revert the least significant bit (LSB) of the firstcond of an IT instruction.
 // From ARMSilhouetteSTR2STRT.cpp
