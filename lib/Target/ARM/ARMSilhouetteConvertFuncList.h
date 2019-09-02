@@ -122,9 +122,12 @@ const static std::set<std::string> funcBlacklist {
     "TIM_SlaveTimer_SetConfig",      // called by HAL_TIM_SlaveConfigSynchronization
     "RCCEx_GetSAIxPeriphCLKFreq",
     "initMPU",
-    // "HAL_GPIO_Init",
+    "HAL_GPIO_Init",
     // "BSP_COM_Init",
-    // "HAL_UART_Transmit",
+    "HAL_UART_Transmit",
+    "HAL_RCC_OscConfig",
+    "HAL_RCC_ClockConfig",
+    "HAL_PWREx_ControlVoltageScaling",
     //     
     "HAL_TIM_IRQHandler",            // Timer interrupt handler
     "SysTick_Handler",               // Timer related handler
