@@ -869,6 +869,54 @@ static std::vector<MachineInstr *> convertVSTR(MachineBasicBlock &MBB,
 
 
 //
+// Function: convertVSTRsfi()
+//
+// Description:
+//   This function protects a floating-point store (VSTR) with SFI. 
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   sourceReg - The register whose contents will be stored to some memory address.
+//   baseReg - The register used as the base register to compute the memory address.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   isSinglePrecision - Indicate if it is a single-precision or double-precision store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//   calledByOtherConverter - Whether this function is called by another store
+//   conversion function.
+//
+// Outputs:
+//   Added instructions.
+//
+static std::vector<MachineInstr *> convertVSTRsfi(MachineBasicBlock &MBB,
+                           MachineInstr *MI,
+                           unsigned sourceReg, unsigned baseReg, int imm,
+                           bool isSinglePrecision,
+                           DebugLoc &DL, const TargetInstrInfo *TII,
+                           bool calledByOtherConverter = false) {
+  std::vector<MachineInstr *> newInstrs;
+
+  unsigned newOpcode = ARM::t2ANDri;
+
+  newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
+    .addReg(baseReg)
+    .addImm(4294967295U).addImm(0)
+    // .addImm(4294967295U)
+    .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+    .operator->());
+  newInstrs.push_back(MI);
+
+  if (calledByOtherConverter == true) {
+    return newInstrs;
+  } else {
+    insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+    return std::vector<MachineInstr *>();
+  }
+}
+
+
+//
 // Function: convertSTM()
 //
 // Description:
@@ -971,6 +1019,41 @@ static void convertSTM(MachineBasicBlock &MBB, MachineInstr *MI,
 }
 
 
+//
+// Function: convertSTMsfi()
+//
+// Description:
+//   This function protects a store-multiple-word, i.e., STM or STMDB, with 
+//   SFI.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   baseReg - The register used as the base register to get the memory address.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   None
+//   
+static void convertSTMsfi(MachineBasicBlock &MBB, MachineInstr *MI,
+                 unsigned baseReg,
+                 DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+
+  unsigned newOpcode = ARM::t2ANDri;
+
+  newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
+    .addReg(baseReg)
+    .addImm(4294967295U).addImm(0)
+    .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+    .operator->());
+  newInstrs.push_back(MI);
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+}
+
+
 // Function convertPUSH()
 //
 // Description:
@@ -1015,6 +1098,40 @@ static void convertPUSH(MachineBasicBlock &MBB, MachineInstr *MI,
   for (unsigned i = 0; i < numOfReg; i++) {
     buildUnprivStr(MBB, MI, regList[i], SP, i * 4, ARM::t2STRT, DL, TII);
   }
+}
+
+
+// Function convertPUSHsfi()
+//
+// Description:
+//   This function protects a PUSH with SFI.
+//   A push is essentially a STM with update. Maybe we should combine this 
+//   function with convertSTM().
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   None
+//
+static void convertPUSHsfi(MachineBasicBlock &MBB, MachineInstr *MI,
+                        DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+
+  unsigned baseReg = ARM::SP;
+  unsigned opcode = ARM::t2ANDri;
+
+  newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), baseReg)
+    .addReg(baseReg)
+    .addImm(4294967295U).addImm(0)
+    .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+    .operator->());
+  newInstrs.push_back(MI);
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
@@ -1102,6 +1219,45 @@ static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
   // and then pop back. Thus, there'd be unnecessary (and consecutive) 
   // <pop, store> pairs generatd. We can remove these <pop, push> pairs to save 
   // both space and running time.
+}
+
+
+//
+// Function convertVSTMsfi()
+//
+// Description:
+//   This function protects a VSTM with SFI.
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   baseReg - The register used as the base register to get the memory address.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//
+// Outputs:
+//   None
+//
+static void convertVSTMsfi(MachineBasicBlock &MBB, MachineInstr *MI,
+                 DebugLoc &DL, const TargetInstrInfo *TII) {
+  std::vector<MachineInstr *> newInstrs;
+  std::vector<MachineInstr *> newInstrsVSTR;
+
+  unsigned SP = ARM::SP;  // for the convenience of typing
+  unsigned opcode = ARM::t2ANDri;
+  bool isSinglePrecision = (opcode == ARM::VSTMSDB_UPD || 
+                            opcode == ARM::VSTMSIA_UPD);
+  bool isPush = (opcode == ARM::VSTMSDB_UPD || opcode == ARM::VSTMDDB_UPD);
+  unsigned memReg = isPush ? SP : MI->getOperand(0).getReg();
+
+  newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), memReg)
+    .addReg(memReg)
+    .addImm(4294967295U).addImm(0)
+    .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+    .operator->());
+  newInstrs.push_back(MI);
+
+  insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
 }
 
 
@@ -1356,8 +1512,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
           // We need use 2^8 - imm to get the real immediate.
           imm = MI.getOperand(2).getImm();
           imm = imm >= 256 ? ((256 - imm) << 2) : (imm << 2);
-          convertVSTR(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::VSTRS, DL, TII);
-          originalStores.push_back(&MI);
+          convertVSTRsfi(MBB, &MI, sourceReg, baseReg, imm, opcode == ARM::VSTRS, DL, TII);
+          // originalStores.push_back(&MI);
 #endif
           break;
 
@@ -1368,8 +1524,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::t2STMDB:      // A7.7.157 Encoding T1; no write back
 #if 1
           baseReg = MI.getOperand(0).getReg();
-          convertSTM(MBB, &MI, baseReg, DL, TII);
-          originalStores.push_back(&MI);
+          convertSTMsfi(MBB, &MI, baseReg, DL, TII);
+          // originalStores.push_back(&MI);
 #endif
           break;
 
@@ -1378,8 +1534,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tPUSH:            // A7.7.99 Encoding T1;
         case ARM::t2STMDB_UPD:      // A7.7.99 Encoding T2; 
 #if 1
-          convertPUSH(MBB, &MI, DL, TII);
-          originalStores.push_back(&MI);
+          convertPUSHsfi(MBB, &MI, DL, TII);
+          // originalStores.push_back(&MI);
 #endif
           break;
 
@@ -1391,8 +1547,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::VSTMSIA_UPD:  // vstmia single-precision then update
         case ARM::VSTMDIA:      // vstmia double-precision no update
 #if 1
-          convertVSTM(MBB, &MI, DL, TII);
-          originalStores.push_back(&MI);
+          convertVSTMsfi(MBB, &MI, DL, TII);
+          // originalStores.push_back(&MI);
 #endif
           break;
 
