@@ -31,6 +31,8 @@ using namespace llvm;
 // number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
 #define GP_REGULAR_REG_NUM 13  
 
+#define SFI_MASK 1073758208U // 0x40004000
+
 // Revert the least significant bit (LSB) of the firstcond of an IT instruction.
 #define invertLSB(num) (num ^ 0x00000001)
 
@@ -897,12 +899,12 @@ static std::vector<MachineInstr *> convertVSTRsfi(MachineBasicBlock &MBB,
                            bool calledByOtherConverter = false) {
   std::vector<MachineInstr *> newInstrs;
 
-  unsigned newOpcode = ARM::t2ANDri;
+  unsigned newOpcode = ARM::t2BICri;
 
   newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
     .addReg(baseReg)
-    .addImm(4294967295U).addImm(0)
-    // .addImm(4294967295U)
+    .addImm(SFI_MASK).addImm(0)
+    // .addImm(2147450879U)
     .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
     .operator->());
   newInstrs.push_back(MI);
@@ -1041,11 +1043,11 @@ static void convertSTMsfi(MachineBasicBlock &MBB, MachineInstr *MI,
                  DebugLoc &DL, const TargetInstrInfo *TII) {
   std::vector<MachineInstr *> newInstrs;
 
-  unsigned newOpcode = ARM::t2ANDri;
+  unsigned newOpcode = ARM::t2BICri;
 
   newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
     .addReg(baseReg)
-    .addImm(4294967295U).addImm(0)
+    .addImm(SFI_MASK).addImm(0)
     .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
     .operator->());
   newInstrs.push_back(MI);
@@ -1122,11 +1124,11 @@ static void convertPUSHsfi(MachineBasicBlock &MBB, MachineInstr *MI,
   std::vector<MachineInstr *> newInstrs;
 
   unsigned baseReg = ARM::SP;
-  unsigned opcode = ARM::t2ANDri;
+  unsigned opcode = ARM::t2BICri;
 
   newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), baseReg)
     .addReg(baseReg)
-    .addImm(4294967295U).addImm(0)
+    .addImm(SFI_MASK).addImm(0)
     .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
     .operator->());
   newInstrs.push_back(MI);
@@ -1244,7 +1246,7 @@ static void convertVSTMsfi(MachineBasicBlock &MBB, MachineInstr *MI,
   std::vector<MachineInstr *> newInstrsVSTR;
 
   unsigned SP = ARM::SP;  // for the convenience of typing
-  unsigned opcode = ARM::t2ANDri;
+  unsigned opcode = ARM::t2BICri;
   bool isSinglePrecision = (opcode == ARM::VSTMSDB_UPD || 
                             opcode == ARM::VSTMSIA_UPD);
   bool isPush = (opcode == ARM::VSTMSDB_UPD || opcode == ARM::VSTMDDB_UPD);
@@ -1252,7 +1254,7 @@ static void convertVSTMsfi(MachineBasicBlock &MBB, MachineInstr *MI,
 
   newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), memReg)
     .addReg(memReg)
-    .addImm(4294967295U).addImm(0)
+    .addImm(SFI_MASK).addImm(0)
     .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
     .operator->());
   newInstrs.push_back(MI);
