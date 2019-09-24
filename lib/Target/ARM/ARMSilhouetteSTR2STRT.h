@@ -16,6 +16,8 @@
 #ifndef ARM_SILHOUETTE_STR2STRT
 #define ARM_SILHOUETTE_STR2STRT
 
+#define SILHOUETTE_SFI 1
+
 #include "llvm/CodeGen/MachineFunctionPass.h"
 namespace llvm {
   struct ARMSilhouetteSTR2STRT : public MachineFunctionPass {

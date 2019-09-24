@@ -31,7 +31,7 @@ using namespace llvm;
 // number of general-purpose registers R0 - R12, excluding SP, PC, and LR.
 #define GP_REGULAR_REG_NUM 13  
 
-#define SFI_MASK 1073758208U // 0x40004000
+#define SFI_MASK 3221274624U // 0xC000C000
 
 // Revert the least significant bit (LSB) of the firstcond of an IT instruction.
 #define invertLSB(num) (num ^ 0x00000001)
@@ -527,6 +527,136 @@ static std::vector<MachineInstr *> convertSTRimm(MachineBasicBlock &MBB,
     } else {
       newInstrs.push_back(
           buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII));
+    }
+  }
+  if (calledByOtherConverter) {
+    return newInstrs;
+  } else {
+    insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
+    return std::vector<MachineInstr *>();
+  }
+}
+
+//
+// Method: convertSTRsfi()
+//
+// Description:
+//   This method builds SFI protection for a store instruction. 
+//
+// Inputs:
+//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
+//   MI - The MachineInstr before which to insert the the new unprivileged store.
+//   sourceReg - The register whose contents will be stored to some memory address.
+//   baseReg - The register used as the base register to compute the memory address.
+//   imm - The immediate that is added to the baseReg to compute the memory address.
+//   newOpcode - The opcode of the unprivileged store.
+//   DL - A reference to the DebugLoc structure.
+//   TII - A pointer to the TargetInstrInfo structure.
+//   calledByOtherConverter - Whether this function is called by another store
+//   conversion function.
+//
+// Outputs:
+//   SFI bit mask instructions before the store.
+//
+// Return:
+//   None.
+//
+static std::vector<MachineInstr *> convertSTRsfi(MachineBasicBlock &MBB,
+                       MachineInstr *MI,
+                       unsigned sourceReg, unsigned baseReg, int64_t imm,
+                       unsigned newOpcode, 
+                       DebugLoc &DL, const TargetInstrInfo *TII,
+                       bool calledByOtherConverter = false) {
+  std::vector<MachineInstr *> newInstrs;
+  newOpcode = ARM::t2BICri;
+
+  // Unprivileged stores only support positive imm. If imm is a negative, then 
+  // we need to sub this imm to the base register, give 0 to the imm field of 
+  // the new str, and restore the base registr.
+  if (imm < 0) {
+    // This sub will update the status flags; we need put it in a IT block.
+    buildAddorSub(MBB, MI, baseReg, -imm, false, newInstrs, TII);
+    
+      // Add SFI Mask
+      newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
+        .addReg(baseReg)
+        .addImm(SFI_MASK).addImm(0)
+        .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+        .operator->());
+      newInstrs.push_back(MI);
+
+    // restore the base register
+    buildAddorSub(MBB, MI, baseReg, -imm, true, newInstrs, TII);
+  } else {
+    if (imm > 8) {
+      // The range of the imm of an unprivileged store is 0 - 255. If imm > 255,
+      // we need extra instructions to assist the transformation.
+      
+      // If the base register is SP then the imm must be a multiple of 4 to do
+      // a ADD (SP + imm). Although according to the manual, the Encoding T4
+      // of ADD (SP + imm) allows imm to be any value in the range o 0 - 4095,
+      // I couldn't find such an ADD in the .td file. So we pick a register,
+      // back it up on the stack, use this register to compute the target 
+      // address, and then restore it.
+      unsigned addOp = (baseReg <= ARM::R7) ? ARM::tADDi8 : ARM::t2ADDri12;
+      unsigned subOp = (baseReg <= ARM::R7) ? ARM::tSUBi8 : ARM::t2SUBri12;
+      if (baseReg == ARM::SP && imm % 4 != 0) {
+        // Pick R0 or R1 as the interim register.
+        unsigned interimReg = (sourceReg == ARM::R0 ? ARM::R1 : ARM::R0);
+        backupReg(MBB, MI, interimReg, newInstrs, TII);
+
+        // Compute the destination address.
+        newInstrs.push_back(
+            BuildMI(MBB, MI, DL, TII->get(addOp), interimReg)
+            .addReg(ARM::SP).addImm(imm + 4)
+            .addImm(ARMCC::AL).addReg(0)
+            .operator->());
+
+        // Add SFI Mask
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
+          .addReg(baseReg)
+          .addImm(SFI_MASK).addImm(0)
+          .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+          .operator->());
+        newInstrs.push_back(MI);
+
+        // Restore the interim register.
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
+            .addImm(ARMCC::AL).addReg(0)
+            .addReg(interimReg)
+            .operator->());
+      } else {
+        // Compute the destination register.
+        newInstrs.push_back(
+            BuildMI(MBB, MI, DL, TII->get(addOp), baseReg)
+            .addReg(baseReg).addImm(imm)
+            .addImm(ARMCC::AL).addReg(0)
+            .operator->());
+
+
+        // Add SFI Mask
+        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
+          .addReg(baseReg)
+          .addImm(SFI_MASK).addImm(0)
+          .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+          .operator->());
+        newInstrs.push_back(MI);
+
+        // Restore the base register.
+        newInstrs.push_back(
+            BuildMI(MBB, MI, DL, TII->get(subOp), baseReg)
+            .addReg(baseReg).addImm(imm)
+            .addImm(ARMCC::AL).addReg(0)
+            .operator->());
+      }
+    } else {
+      // Add SFI Mask
+      newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(newOpcode), baseReg)
+        .addReg(baseReg)
+        .addImm(SFI_MASK).addImm(0)
+        .addImm(ARMCC::AL).addReg(0)  // pred:14, pred:%noreg
+        .operator->());
+      newInstrs.push_back(MI);
     }
   }
   if (calledByOtherConverter) {
@@ -1543,8 +1673,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tSTRBi:     // A7.7.160 Encoding T1
         case ARM::t2STRBi12:  // Encoding T2: STRB<c>.W <Rt>,[<Rn>,#<imm12>]
         case ARM::t2STRBi8:   // Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
-#if 1
-          sourceReg = MI.getOperand(0).getReg();
+        sourceReg = MI.getOperand(0).getReg();
           baseReg = MI.getOperand(1).getReg();
           imm = MI.getOperand(2).getImm();
           if (opcode == ARM::tSTRi || opcode == ARM::tSTRspi) {
@@ -1555,6 +1684,9 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
             // The imm of this store = ZeroExtend(imm5:'0',32).
             imm <<= 1;
           }
+#if SILHOUETTE_SFI
+          convertSTRsfi(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+#else
           convertSTRimm(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
           originalStores.push_back(&MI);
 #endif
@@ -1570,10 +1702,12 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store byte; A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
         case ARM::t2STRB_PRE:   // pre-indexed store
         case ARM::t2STRB_POST:  // post-index store
-#if 1
           sourceReg = MI.getOperand(1).getReg();  
           baseReg = MI.getOperand(0).getReg(); // the reg to be updated
           imm = MI.getOperand(3).getImm();
+#if SILHOUETTE_SFI
+          convertSTRsfi(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+#else
           // There is no second base register for these three kinds of stores.
           convertSTRimmIndexed(MBB, &MI, sourceReg, 0, baseReg, imm, newOpcode, TII);
           originalStores.push_back(&MI);
@@ -1600,11 +1734,13 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 
         // STRD (immediate); A7.7.163; Encoding T1
         case ARM::t2STRDi8:  // no write back
-#if 1
           sourceReg = MI.getOperand(0).getReg();
           sourceReg2 = MI.getOperand(1).getReg();
           baseReg = MI.getOperand(2).getReg();
           imm = MI.getOperand(3).getImm();
+#if SILHOUETTE_SFI
+          convertSTRsfi(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+#else
           // Although the imm is ZeroExtended by two bits, we don't need do 
           // anthing here because the MIR is already encoded with the real imm.
           convertSTRDimm(MBB, &MI, sourceReg, sourceReg2, baseReg, imm,
@@ -1616,11 +1752,13 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // STRD (immediate) with write back
         case ARM::t2STRD_PRE:
         case ARM::t2STRD_POST:
-#if 1
           sourceReg = MI.getOperand(1).getReg();
           sourceReg2 = MI.getOperand(2).getReg();
           baseReg = MI.getOperand(0).getReg();
           imm = MI.getOperand(4).getImm();
+#if SILHOUETTE_SFI
+          convertSTRsfi(MBB, &MI, sourceReg, baseReg, imm, newOpcode, DL, TII);
+#else
           convertSTRimmIndexed(MBB, &MI, sourceReg, sourceReg2, baseReg, imm, newOpcode, TII);
           originalStores.push_back(&MI);
 #endif
