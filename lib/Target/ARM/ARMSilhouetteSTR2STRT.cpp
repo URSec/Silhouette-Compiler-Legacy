@@ -411,7 +411,7 @@ static void buildAddorSub(MachineBasicBlock &MBB, MachineInstr *MI,
                       std::vector<MachineInstr *> &newInstrs,
                       const TargetInstrInfo *TII) {
   unsigned opcode;
-  if (baseReg <= ARM::R7) {
+  if (baseReg >= ARM::R0 && baseReg <= ARM::R7) {
     opcode = isAdd ? ARM::tADDi8 : ARM::tSUBi8;
     newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(opcode), baseReg)
         .addReg(baseReg).addReg(baseReg).addImm(imm)
