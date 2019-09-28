@@ -485,7 +485,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           MCInstrDesc MIdesc = MI.getDesc();
           int pred;
           // Save predicates of original LDMIA instruction
-          for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MI.getNumOperands(); pred++){
+          for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MIdesc.getNumOperands(); pred++){
             if (MIdesc.OpInfo[pred].isPredicate()){
               // errs() << "predicate index: " << pred << "\r\n";
               additional_operands.push_back(&MI.getOperand(pred));
@@ -545,7 +545,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           MCInstrDesc MIdesc = MI.getDesc();
           int pred;
           // Save predicates of original POP instruction
-          for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MI.getNumOperands(); pred++){
+          for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MIdesc.getNumOperands(); pred++){
             if (MIdesc.OpInfo[pred].isPredicate()){
               // errs() << "predicate index: " << pred << "\r\n";
               additional_operands.push_back(&MI.getOperand(pred));
