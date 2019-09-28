@@ -284,7 +284,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
     imm_left = (imm >= 0) ? imm : -imm;
     MachineInstr *addInstr = strInstr;
     while (imm_left > 4095){
-      MachineInstrBuilder MIB = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
+      MachineInstrBuilder MIB = BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095).setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
       if (imm_left < 4095 && imm_left >= 0){
         for (MachineOperand* MO : extra_operands){
@@ -302,7 +302,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       addInstr = MIB.getInstr();
     }
     if (imm < 0){
-      MachineInstrBuilder MIB = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      MachineInstrBuilder MIB = BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left).setMIFlag(MachineInstr::ShadowStack);
       for (MachineOperand* MO : extra_operands){
         MIB.addOperand(*MO);
       }
