@@ -791,128 +791,6 @@ static std::vector<MachineInstr *> convertSTRDimm(MachineBasicBlock &MBB,
 
 
 //
-// Method: convertSTRDimm()
-//
-// Description:
-//   This method builds an unprivileged store for a STRD(immediate). Currently
-//   it handles STRD -> 2 STRT. 
-//   Note that the imm field of a STRT instruction ranges 0 - 255.
-//
-// Inputs:
-//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
-//   MI - The MachineInstr before which to insert the the new unprivileged store.
-//   sourceReg - The register whose contents will be stored to some memory address.
-//   sourceReg2 - The second register to store to memory address
-//   baseReg - The register used as the base register to compute the memory address.
-//   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newOpcode - The opcode of the unprivileged store.
-//   DL - A reference to the DebugLoc structure.
-//   TII - A pointer to the TargetInstrInfo structure.
-//   calledByOtherConverter - Whether this function is called by another store
-//   conversion function.
-//
-// Outputs:
-//   A new unprivileged store.
-//
-// Return:
-//   None.
-//
-static std::vector<MachineInstr *> convertSTRDimm(MachineBasicBlock &MBB,
-                       MachineInstr *MI,
-                       unsigned sourceReg, 
-                       unsigned sourceReg2, unsigned baseReg, int64_t imm,
-                       unsigned newOpcode, 
-                       DebugLoc &DL, const TargetInstrInfo *TII,
-                       bool calledByOtherConverter = false) {
-  std::vector<MachineInstr *> newInstrs;
-
-  // Unprivileged stores only support positive imm. If imm is a negative, then 
-  // we need to sub this imm to the base register, give 0 to the imm field of 
-  // the new str, and restore the base registr.
-  if (imm < 0) {
-    // This sub will update the status flags; we need put it in a IT block.
-    buildAddorSub(MBB, MI, baseReg, -imm, false, newInstrs, TII);
-    
-    // insert new unprivileged stores
-    newInstrs.push_back(
-        buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
-    newInstrs.push_back(
-        buildUnprivStr(MBB, MI, sourceReg2, baseReg, 4, newOpcode, DL, TII));
-
-    // restore the base register
-    buildAddorSub(MBB, MI, baseReg, -imm, true, newInstrs, TII);
-  } else {
-    if (imm > 251) {
-      // The range of the imm of an unprivileged store is 0 - 255. If imm > 255,
-      // we need extra instructions to assist the transformation.
-      
-      // If the base register is SP then the imm must be a multiple of 4 to do
-      // a ADD (SP + imm). Although according to the manual, the Encoding T4
-      // of ADD (SP + imm) allows imm to be any value in the range o 0 - 4095,
-      // I couldn't find such an ADD in the .td file. So we pick a register,
-      // back it up on the stack, use this register to compute the target 
-      // address, and then restore it.
-      if (baseReg == ARM::SP && imm % 4 != 0) {
-        // Pick R0 or R1 as the interim register.
-        unsigned interimReg = (sourceReg == ARM::R0 ? ARM::R1 : ARM::R0);
-        backupReg(MBB, MI, interimReg, newInstrs, TII);
-
-        // Compute the destination address.
-        newInstrs.push_back(
-            BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), interimReg)
-            .addReg(ARM::SP).addImm(imm + 4)
-            .addImm(ARMCC::AL).addReg(0)
-            .operator->());
-
-        // Do the stores.
-        newInstrs.push_back(
-            buildUnprivStr(MBB, MI, sourceReg, interimReg, 0, newOpcode, DL, TII));
-        newInstrs.push_back(
-            buildUnprivStr(MBB, MI, sourceReg2, interimReg, 4, newOpcode, DL, TII));
-
-        // Restore the interim register.
-        newInstrs.push_back(BuildMI(MBB, MI, DL, TII->get(ARM::tPOP))
-            .addImm(ARMCC::AL).addReg(0)
-            .addReg(interimReg)
-            .operator->());
-      } else {
-        // Compute the destination register.
-        newInstrs.push_back(
-            BuildMI(MBB, MI, DL, TII->get(ARM::t2ADDri12), baseReg)
-            .addReg(baseReg).addImm(imm)
-            .addImm(ARMCC::AL).addReg(0)
-            .operator->());
-
-        // Do the store.
-        newInstrs.push_back(
-            buildUnprivStr(MBB, MI, sourceReg, baseReg, 0, newOpcode, DL, TII));
-        newInstrs.push_back(
-            buildUnprivStr(MBB, MI, sourceReg2, baseReg, 4, newOpcode, DL, TII));
-
-        // Restore the base register.
-        newInstrs.push_back(
-            BuildMI(MBB, MI, DL, TII->get(ARM::t2SUBri12), baseReg)
-            .addReg(baseReg).addImm(imm)
-            .addImm(ARMCC::AL).addReg(0)
-            .operator->());
-      }
-    } else {
-      newInstrs.push_back(
-          buildUnprivStr(MBB, MI, sourceReg, baseReg, imm, newOpcode, DL, TII));
-      newInstrs.push_back(
-          buildUnprivStr(MBB, MI, sourceReg2, baseReg, imm + 4, newOpcode, DL, TII));
-    }
-  }
-  if (calledByOtherConverter) {
-    return newInstrs;
-  } else {
-    insertITInstrIfNeeded(newInstrs, MBB, MI, TII);
-    return std::vector<MachineInstr *>();
-  }
-}
-
-
-//
 // Method: convertSTRimmIndexed()
 //
 // Description:
@@ -1865,13 +1743,8 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
 #else
           // Although the imm is ZeroExtended by two bits, we don't need do 
           // anthing here because the MIR is already encoded with the real imm.
-<<<<<<< HEAD
           convertSTRDimm(MBB, &MI, sourceReg, sourceReg2, baseReg, imm,
           newOpcode, DL, TII);
-=======
-          convertSTRDimm(MBB, &MI, sourceReg, sourceReg2, baseReg, imm, 
-            newOpcode, DL, TII);
->>>>>>> c7c7754d8f3... Optimised STRD conversion
           originalStores.push_back(&MI);
 #endif
           break;
