@@ -170,9 +170,9 @@ SplitFullITBlock(MachineInstr & OldIT, MachineInstr & MI, ARMCC::CondCodes CC) {
   OldMaskMO.setImm(Mask);
 
   // Insert a new IT that covers @MI
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2IT))
-  .addImm(CC)
-  .addImm(0x8);
+  return BuildMI(MBB, &MI, DL, TII->get(ARM::t2IT))
+         .addImm(CC)
+         .addImm(0x8);
 }
 
 //

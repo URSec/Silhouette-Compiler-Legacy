@@ -39,8 +39,6 @@ char ARMSilhouetteShadowStack::ID = 0;
 
 static DebugLoc DL;
 
- 
-
 ARMSilhouetteShadowStack::ARMSilhouetteShadowStack() : MachineFunctionPass(ID) {
   return;
 }
@@ -48,51 +46,6 @@ ARMSilhouetteShadowStack::ARMSilhouetteShadowStack() : MachineFunctionPass(ID) {
 StringRef ARMSilhouetteShadowStack::getPassName() const {
   return "ARM Silhouette Shadow Stack Pass";
 }
-
-
-
-
-//
-// Method: buildUnprivStr
-//
-// Description:
-//   This method builds an unprivileged store instruction.
-//   Unprivileged load/store instructions only support 8-bit immediate, ranging
-//   from 0 to 255; but a normal store can have an immediate as large as 1023.
-//   For a negative immediate or one that is greater than 255, it's already
-//   handled in the convertSTRimm() function.
-//
-// Inputs:
-//   MBB - The MachineBasicBlock in which to insert the new unprivileged store.
-//   MI - The MachineInstr before which to insert the the new unprivileged store.
-//   sourceReg - The register whose contents will be stored to some memory address.
-//   baseReg - The register used as the base register to compute the memory address.
-//   imm - The immediate that is added to the baseReg to compute the memory address.
-//   newOpcode - The opcode of the unprivileged store.
-//   DL - A reference to the DebugLoc structure.
-//   TII - A pointer to the TargetInstrInfo structure.
-//
-// Outputs:
-//   A new unprivileged store.
-//
-// Return:
-//   A newly created store instruction.
-//
-static MachineInstr *buildUnprivStr(MachineBasicBlock &MBB,
-                      MachineInstr *MI,
-                      unsigned sourceReg, unsigned baseReg, uint64_t imm,
-                      unsigned newOpcode,
-                      DebugLoc &DL,
-                      const TargetInstrInfo *TII) {
-  return BuildMI(MBB, MI, DL, TII->get(newOpcode))
-          .addReg(sourceReg)
-          .addReg(baseReg)
-          .addImm(imm).operator->();
-}
-
-
-
-
 
 //
 // Function getFuncCodeSize()
@@ -195,7 +148,6 @@ static MachineInstr *buildStrSSInstr(MachineBasicBlock &MBB,
   }
   
 }
-
 
 //
 // Method: buildLdrSSInstr
@@ -401,8 +353,6 @@ static MachineInstr *rebuildPopInstr(MachineBasicBlock &MBB,
   return MIB.getInstr();
 }
 
-
-
 //
 // Method: runOnMachineFunction()
 //
@@ -504,7 +454,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
         case ARM::t2LDMIA_UPD:{
           bool hasLR = false; // LDMIA instruction may not contain PC reg
           MCInstrDesc MIdesc = MI.getDesc();
-          int pred;
+          unsigned pred;
           // Save predicates of original LDMIA instruction
           for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MIdesc.getNumOperands(); pred++){
             if (MIdesc.OpInfo[pred].isPredicate()){
@@ -530,7 +480,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // Build ADD instruction to add SP since we don't pop PC anymore. Add it before LDR instruction
                 MachineInstrBuilder addSP = BuildMI(MBB, ldrMI, DL, TII->get(ARM::tADDspi), ARM::SP).addReg(ARM::SP).addImm(1).setMIFlag(MachineInstr::ShadowStack);
                 // Build POP instruction that does not contain PC. Add it before ADD instruction. 
-                MachineInstr* newMI = rebuildPopInstr(MBB, &MI, DL, TII, additional_operands, addSP.getInstr());
+                rebuildPopInstr(MBB, &MI, DL, TII, additional_operands, addSP.getInstr());
                 // Add original predicates to ADD instruction but remove Kill flag for registers
                 for (MachineOperand* MO : additional_operands){
                   if (MO->isReg()){
@@ -564,7 +514,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
         case ARM::tPOP:{
           bool hasPC = false; // POP instruction may not contain PC reg
           MCInstrDesc MIdesc = MI.getDesc();
-          int pred;
+          unsigned pred;
           // Save predicates of original POP instruction
           for (pred = MIdesc.findFirstPredOperandIdx(); pred >= 0 && pred < MIdesc.getNumOperands(); pred++){
             if (MIdesc.OpInfo[pred].isPredicate()){
@@ -593,7 +543,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // Build ADD instruction to add SP since we don't pop PC anymore. Add it before LDR instruction
                 MachineInstrBuilder addSP = BuildMI(MBB, ldrMI, DL, TII->get(ARM::tADDspi), ARM::SP).addReg(ARM::SP).addImm(1).setMIFlag(MachineInstr::ShadowStack);
                 // Build POP instruction that does not contain PC. Add it before ADD instruction. 
-                MachineInstr* newMI = rebuildPopInstr(MBB, &MI, DL, TII, additional_operands, addSP.getInstr());
+                rebuildPopInstr(MBB, &MI, DL, TII, additional_operands, addSP.getInstr());
                 // Add original predicates to ADD instruction but remove Kill flag for registers
                 for (MachineOperand* MO : additional_operands){
                   if (MO->isReg()){
@@ -744,6 +694,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
 
 //
 // Create a new pass.
+//
 namespace llvm {
   FunctionPass *createARMSilhouetteShadowStack(void) {
     return new ARMSilhouetteShadowStack();

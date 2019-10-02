@@ -379,7 +379,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   raw_fd_ostream JTJStat("./jump_table_jump.stat", EC,
                          sys::fs::OpenFlags::F_Append);
   for (MachineInstr * MI : JTJs) {
-    JTJStat << MF.getName() << "\n";
+    JTJStat << MI->getMF()->getName() << "\n";
   }
 
   return true;
