@@ -323,9 +323,9 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   // Insert a CFI label before the function if it is visible to other
   // compilation units or has its address taken.
   //
-  const Function * F = MF.getFunction();
-  if ((!F->hasInternalLinkage() && !F->hasPrivateLinkage()) ||
-      F->hasAddressTaken()) {
+  const Function & F = MF.getFunction();
+  if ((!F.hasInternalLinkage() && !F.hasPrivateLinkage()) ||
+      F.hasAddressTaken()) {
     if (MF.begin() != MF.end()) {
       insertCFILabel(MF);
     }

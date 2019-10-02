@@ -469,10 +469,10 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // If this instruction is inside IT block, add IT instruction 
                 // for the next 3 instructions: LDMIA, ADD, LDR. 
                 if (!ITconds.empty()){
-                  unsigned firstcondLSB = ITconds.front() & 0x00000001;
-                  unsigned mask = 2;
-                  mask = mask | (firstcondLSB << 3) | (firstcondLSB << 2);
-                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
+                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT))
+                  .addImm(ITconds.front())
+                  .addImm(2)
+                  .setMIFlag(MachineInstr::ShadowStack);
                   ITconds.erase(ITconds.begin());
                 }
                 // Build LDR instruction
@@ -529,10 +529,10 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                 // If this instruction is inside IT block, add IT instruction 
                 // for the next 3 instructions: POP, ADD, LDR. 
                 if (!ITconds.empty()){
-                  unsigned firstcondLSB = ITconds.front() & 0x00000001;
-                  unsigned mask = 2;
-                  mask = mask | (firstcondLSB << 3) | (firstcondLSB << 2);
-                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT)).addImm(ITconds.front()).addImm(mask).setMIFlag(MachineInstr::ShadowStack);
+                  BuildMI(MBB, MI, DL, TII->get(ARM::t2IT))
+                  .addImm(ITconds.front())
+                  .addImm(2)
+                  .setMIFlag(MachineInstr::ShadowStack);
                   ITconds.erase(ITconds.begin());
                 }
                 // errs() << "Found PC: ";
@@ -633,12 +633,11 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
           // and remove original IT instruction. 
           if (hasPOP) {
             ITconds.push_back(firstcond);
-            unsigned firstcondLSB = firstcond & 0x00000001;
             unsigned firstcondLSBInverted = invertLSB(firstcond);
 
             numCondInstr--;
             for (unsigned i = 3; numCondInstr > 0; numCondInstr--, i--) {
-              unsigned CC = (firstcondLSB == ((mask & (1u << i)) >> i)) ? 
+              unsigned CC = (((mask & (1u << i)) >> i) == 0) ? 
                 firstcond : firstcondLSBInverted;
               ITconds.push_back(CC);
             }

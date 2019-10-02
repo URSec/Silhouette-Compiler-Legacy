@@ -216,13 +216,12 @@ static void splitITBlockWithSTR(MachineFunction &MF) {
         currMI = MI.getNextNode();
         buildITInstr(MBB, currMI, DL, ABII, firstcond);
 
-        unsigned firstcondLSB = firstcond & 0x00000001;
         unsigned firstcondLSBInverted = invertLSB(firstcond);
 
         numOfCondInstr--;
         for (unsigned i = 3; numOfCondInstr > 0; numOfCondInstr--, i--) {
           currMI = currMI->getNextNode();
-          unsigned CC = (firstcondLSB == ((mask & (1u << i)) >> i)) ? 
+          unsigned CC = (((mask & (1u << i)) >> i) == 0) ? 
             firstcond : firstcondLSBInverted;
           buildITInstr(MBB, currMI, DL, ABII, CC);
         }
