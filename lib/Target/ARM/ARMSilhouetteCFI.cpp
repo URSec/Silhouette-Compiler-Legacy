@@ -194,12 +194,11 @@ InsertBFC(MachineInstr & MI, unsigned Reg) {
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
   // Insert a BFC to clear the second LSB
-  AddDefaultPred(
-    BuildMI(MBB, &MI, DL, TII->get(ARM::t2BFC), Reg)
-    .addReg(Reg)
-    .addImm(~0x2) // Don't clear the LSB; BX and BLX use it to exchange
-                  // instruction set.  For others, we assume it's cleared.
-  );
+  BuildMI(MBB, &MI, DL, TII->get(ARM::t2BFC), Reg)
+  .addReg(Reg)
+  .addImm(~0x2) // Don't clear the LSB; BX and BLX use it to exchange
+                // instruction set.  For others, we assume it's cleared.
+  .add(predOps(ARMCC::AL));
 }
 
 //
@@ -413,9 +412,9 @@ ARMSilhouetteCFI::runOnMachineFunction(MachineFunction & MF) {
   // Align the function at 4-byte boundaries if it is visible to other
   // compilation units or has its address taken.
   //
-  const Function * F = MF.getFunction();
-  if ((!F->hasInternalLinkage() && !F->hasPrivateLinkage()) ||
-      F->hasAddressTaken()) {
+  const Function & F = MF.getFunction();
+  if ((!F.hasInternalLinkage() && !F.hasPrivateLinkage()) ||
+      F.hasAddressTaken()) {
     if (MF.getAlignment() < 2u) {
       MF.setAlignment(2u);
     }

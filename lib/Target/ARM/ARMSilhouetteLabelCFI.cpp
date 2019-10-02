@@ -66,11 +66,10 @@ BackupRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
   // strt reg1, [sp, #0]
   // strt reg2, [sp, #4]
   //
-  AddDefaultPred(
-    BuildMI(MBB, &MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
-    .addReg(ARM::SP)
-    .addImm(2)
-  );
+  BuildMI(MBB, &MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
+  .addReg(ARM::SP)
+  .addImm(2)
+  .add(predOps(ARMCC::AL));
   BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg1)
   .addReg(ARM::SP)
   .addImm(0);
@@ -98,7 +97,8 @@ RestoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
   // Generate a POP that pops out the register content from stack
-  AddDefaultPred(BuildMI(MBB, &MI, DL, TII->get(ARM::tPOP)))
+  BuildMI(MBB, &MI, DL, TII->get(ARM::tPOP))
+  .add(predOps(ARMCC::AL))
   .addReg(Reg1)
   .addReg(Reg2);
 }
@@ -200,11 +200,10 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   // to indicate an instruction set exchange between ARM and Thumb.
   //
   if (MI.getOpcode() != ARM::tBRIND) {
-    AddDefaultPred(
-      BuildMI(MBB, &MI, DL, TII->get(ARM::t2BFC), Reg)
-      .addReg(Reg)
-      .addImm(~0x1)
-    );
+    BuildMI(MBB, &MI, DL, TII->get(ARM::t2BFC), Reg)
+    .addReg(Reg)
+    .addImm(~0x1)
+    .add(predOps(ARMCC::AL));
   }
   // Load the correct CFI label to @ScratchReg1
   BuildMI(MBB, &MI, DL, TII->get(ARM::t2MOVi16), ScratchReg1)
@@ -227,13 +226,11 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   .addImm(ARMCC::NE).addReg(ARM::CPSR, RegState::Kill);
   // Set the LSB of @Reg for instructions like BX and BLX
   if (MI.getOpcode() != ARM::tBRIND) {
-    AddDefaultCC(
-      AddDefaultPred(
-        BuildMI(MBB, &MI, DL, TII->get(ARM::t2ORRri), Reg)
-        .addReg(Reg)
-        .addImm(0x1)
-      )
-    );
+    BuildMI(MBB, &MI, DL, TII->get(ARM::t2ORRri), Reg)
+    .addReg(Reg)
+    .addImm(0x1)
+    .add(predOps(ARMCC::AL))
+    .add(condCodeOp());
   }
 
   // Restore the two scratch registers

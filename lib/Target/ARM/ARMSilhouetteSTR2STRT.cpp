@@ -1166,7 +1166,7 @@ static void convertVSTM(MachineBasicBlock &MBB, MachineInstr *MI,
   bool isSinglePrecision = (opcode == ARM::VSTMSDB_UPD || 
                             opcode == ARM::VSTMSIA_UPD);
   bool isPush = (opcode == ARM::VSTMSDB_UPD || opcode == ARM::VSTMDDB_UPD);
-  unsigned memReg = isPush ? SP : MI->getOperand(0).getReg();
+  unsigned memReg = isPush ? SP : (unsigned)MI->getOperand(0).getReg();
 
   // Get the register list.
   // The register list of VSTMDIA starts from the fourth operand; all others'
@@ -1301,7 +1301,7 @@ static void printOperands(MachineInstr &MI) {
   unsigned numOperands = MI.getNumOperands();
   errs() << "Number of operands: " << numOperands << "\n";
   for (unsigned i = 0; i < numOperands; i++) {
-    errs() << "Operand type = " << MI.getOperand(i).getType() << "; ";
+    errs() << "Operand type = " << (unsigned)MI.getOperand(i).getType() << "; ";
     MI.getOperand(i).dump();
   }
 }

@@ -146,29 +146,50 @@ static MachineInstr *buildStrSSInstr(MachineBasicBlock &MBB,
   // so imm is not within this range, add it to SP first, and subtract it after store. 
   if ((imm < 4096) && (imm >= 0)){
     // Insert new STR instruction
-    return AddDefaultPred(BuildMI(MBB, MI, DL, TII->get(ARM::t2STRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm)).setMIFlag(MachineInstr::ShadowStack);
+    return BuildMI(MBB, MI, DL, TII->get(ARM::t2STRi12))
+           .addReg(spillReg)
+           .addReg(ARM::SP)
+           .addImm(imm)
+           .add(predOps(ARMCC::AL))
+           .setMIFlag(MachineInstr::ShadowStack);
   } else {
     unsigned addOp = (imm >= 0) ? ARM::t2ADDri12 : ARM::t2SUBri12;
     unsigned subOp = (imm >= 0) ? ARM::t2SUBri12 : ARM::t2ADDri12;
     int64_t imm_left = (imm >= 0) ? imm : -imm;
     MachineInstr *subInstr = MI;
     while (imm_left > 4095){
-      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
+      subInstr = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP)
+                 .addReg(ARM::SP)
+                 .addImm(4095)
+                 .add(predOps(ARMCC::AL))
+                 .setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
     }
     if (imm < 0){
-      subInstr = AddDefaultPred(BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      subInstr = BuildMI(MBB, subInstr, DL, TII->get(subOp), ARM::SP)
+                 .addReg(ARM::SP)
+                 .addImm(imm_left)
+                 .add(predOps(ARMCC::AL))
+                 .setMIFlag(MachineInstr::ShadowStack);
       imm_left = 0;
     }
     MachineInstr *strInstr = buildStrSSInstr(MBB, subInstr, spillReg, imm_left, DL, TII);
     imm_left = (imm >= 0) ? imm : -imm;
     MachineInstr *addInstr = strInstr;
     while (imm_left > 4095){
-      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(4095)).setMIFlag(MachineInstr::ShadowStack);
+      addInstr = BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP)
+                 .addReg(ARM::SP)
+                 .addImm(4095)
+                 .add(predOps(ARMCC::AL))
+                 .setMIFlag(MachineInstr::ShadowStack);
       imm_left -= 4095;
     }
     if (imm < 0){
-      addInstr = AddDefaultPred(BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left)).setMIFlag(MachineInstr::ShadowStack);
+      addInstr = BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP)
+                 .addReg(ARM::SP)
+                 .addImm(imm_left)
+                 .add(predOps(ARMCC::AL))
+                 .setMIFlag(MachineInstr::ShadowStack);
     }
     return strInstr;
   }
@@ -211,7 +232,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
       // Add predicates of original POP to new LDR instruction
       for (MachineOperand* MO : extra_operands){
-        MIB.addOperand(*MO);
+        MIB.add(*MO);
       }
     } 
 #if 0
@@ -252,7 +273,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
         if (MO->isReg()){
           MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
         } else{
-          MIB.addOperand(*MO);
+          MIB.add(*MO);
         }
       }
       MIB.setMIFlag(MachineInstr::ShadowStack);
@@ -271,7 +292,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
         if (MO->isReg()){
           MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
         } else{
-          MIB.addOperand(*MO);
+          MIB.add(*MO);
         }
       }
       MIB.setMIFlag(MachineInstr::ShadowStack);
@@ -288,14 +309,14 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
       imm_left -= 4095;
       if (imm_left < 4095 && imm_left >= 0){
         for (MachineOperand* MO : extra_operands){
-          MIB.addOperand(*MO);
+          MIB.add(*MO);
         }
       } else {
         for (MachineOperand* MO : extra_operands){
           if (MO->isReg()){
             MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
           } else{
-            MIB.addOperand(*MO);
+            MIB.add(*MO);
           }
         }
       }
@@ -304,7 +325,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
     if (imm < 0){
       MachineInstrBuilder MIB = BuildMI(MBB, addInstr, DL, TII->get(addOp), ARM::SP).addReg(ARM::SP).addImm(imm_left).setMIFlag(MachineInstr::ShadowStack);
       for (MachineOperand* MO : extra_operands){
-        MIB.addOperand(*MO);
+        MIB.add(*MO);
       }
       addInstr = MIB.getInstr();
     }
@@ -354,7 +375,7 @@ static MachineInstr *rebuildPopInstr(MachineBasicBlock &MBB,
       if (MO->isReg()){
         MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
       } else{
-        MIB.addOperand(*MO);
+        MIB.add(*MO);
       }
     }
   }
@@ -365,14 +386,14 @@ static MachineInstr *rebuildPopInstr(MachineBasicBlock &MBB,
     if (MO.isReg()){
       if (MI->getOpcode() == ARM::t2LDMIA_UPD){
         if (MO.getReg() != ARM::LR)
-          MIB.addOperand(MO);
+          MIB.add(MO);
       }
       else {
         if (MO.getReg() != ARM::PC)
-          MIB.addOperand(MO);
+          MIB.add(MO);
       }
     } else {
-      MIB.addOperand(MO);
+      MIB.add(MO);
     }
   }
   
@@ -515,7 +536,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                   if (MO->isReg()){
                     addSP.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
                   } else{
-                    addSP.addOperand(*MO);
+                    addSP.add(*MO);
                   }
                 }
                 
@@ -578,7 +599,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
                   if (MO->isReg()){
                     addSP.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
                   } else{
-                    addSP.addOperand(*MO);
+                    addSP.add(*MO);
                   }
                 }
                 
