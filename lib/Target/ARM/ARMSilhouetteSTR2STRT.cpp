@@ -1374,7 +1374,7 @@ bool ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction &MF) {
         // store immediate; A7.7.158 STR (immediate)
         case ARM::tSTRi:      // Encoding T1: STR<c> <Rt>, [<Rn>{,#<imm5>}]
         case ARM::tSTRspi:    // Encoding T2: STR<c> <Rt>, [SP, #<imm8>]
-        case ARM::t2STRi8:    // Encoding T3: STR<c> <Rt>,[SP,#<imm8>]
+        case ARM::t2STRi8:    // Encoding T4: STR<c> <Rt>,[<Rn>,#-<imm8>]
         case ARM::t2STRi12:   // Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
         // store halfword immediate; A7.7.167 STRH (immiedate)
         case ARM::tSTRHi:     // Encoding T1: STRH<c> <Rt>,[<Rn>{,#<imm5>}]

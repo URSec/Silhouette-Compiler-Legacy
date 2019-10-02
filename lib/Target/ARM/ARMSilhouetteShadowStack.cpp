@@ -181,7 +181,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
     // Insert new LDR instruction
     MachineInstrBuilder MIB;
     if (MI->getOpcode() == ARM::tPOP_RET || MI->getOpcode() == ARM::tPOP || MI->getOpcode() == ARM::t2LDMIA_RET || MI->getOpcode() == ARM::t2LDMIA_UPD){
-      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
+      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12), spillReg).addReg(ARM::SP).addImm(imm);
       // Add predicates of original POP to new LDR instruction
       for (MachineOperand* MO : extra_operands){
         MIB.add(*MO);
@@ -189,7 +189,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
     } 
 #if 0
     else{
-      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12)).addReg(spillReg).addReg(ARM::SP).addImm(imm);
+      MIB = BuildMI(MBB, MI, DL, TII->get(ARM::t2LDRi12), spillReg).addReg(ARM::SP).addImm(imm);
       // Add predicates of original POP to new LDR instruction, but do not kill predicate register
       // because later instructions also depends on them. 
       for (MachineOperand* MO : extra_operands){
