@@ -452,6 +452,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
         // LLVM seems to use LDMIA when popping return address to 
         // LR itself (for example: return foo();)
         case ARM::t2LDMIA_UPD:{
+#if 0
           bool hasLR = false; // LDMIA instruction may not contain PC reg
           MCInstrDesc MIdesc = MI.getDesc();
           unsigned pred;
@@ -507,6 +508,7 @@ bool ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction &MF) {
               ITconds.erase(ITconds.begin());
             }
           }
+#endif
           break;
         } 
         case ARM::t2LDMIA_RET:
