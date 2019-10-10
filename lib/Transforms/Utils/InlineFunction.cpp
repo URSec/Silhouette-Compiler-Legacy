@@ -71,6 +71,8 @@
 #include <utility>
 #include <vector>
 
+#include "../../Target/ARM/ARMSilhouetteConvertFuncList.h"
+
 using namespace llvm;
 using ProfileCount = Function::ProfileCount;
 
@@ -1553,6 +1555,11 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   if (!CalledFunc ||               // Can't inline external function or indirect
       CalledFunc->isDeclaration()) // call!
     return "external or indirect";
+
+  if (CalledFunc->hasName() &&
+      funcBlacklist.find(CalledFunc->getName()) != funcBlacklist.end()) {
+    return "blacklisted function";
+  }
 
   // The inliner does not know how to inline through calls with operand bundles
   // in general ...
