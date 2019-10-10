@@ -196,7 +196,7 @@ static MachineInstr *buildLdrSSInstr(MachineBasicBlock &MBB,
         if (MO->isReg()){
           MIB.addReg(MO->getReg(), getRegState(*MO) & !RegState::Kill);
         } else{
-          MIB.addOperand(*MO);
+          MIB.add(*MO);
         }
       }
     }
