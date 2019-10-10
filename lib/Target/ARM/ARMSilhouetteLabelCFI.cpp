@@ -318,7 +318,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
     }
   }
 
-#if 0
+#if 1
   //
   // Insert a CFI label before the function if it is visible to other
   // compilation units or has its address taken.
