@@ -16,9 +16,12 @@
 #ifndef ARM_SILHOUETTE_STR2STRT
 #define ARM_SILHOUETTE_STR2STRT
 
+#include "ARMSilhouetteInstrumentor.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+
 namespace llvm {
-  struct ARMSilhouetteSTR2STRT : public MachineFunctionPass {
+  struct ARMSilhouetteSTR2STRT
+      : public MachineFunctionPass, ARMSilhouetteInstrumentor {
     // pass identifier variable
     static char ID;
 
@@ -26,7 +29,7 @@ namespace llvm {
 
     virtual StringRef getPassName() const override;
 
-    virtual bool runOnMachineFunction(MachineFunction &MF) override;
+    virtual bool runOnMachineFunction(MachineFunction & MF) override;
   };
 
   FunctionPass *createARMSilhouetteSTR2STRT(void);
