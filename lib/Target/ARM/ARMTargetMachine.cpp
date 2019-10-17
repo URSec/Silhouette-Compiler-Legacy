@@ -103,6 +103,13 @@ EnableSilhouetteShadowStack("enable-arm-silhouette-shadowstack",
                             cl::location(SilhouetteShadowStack),
                             cl::init(false), cl::Hidden);
 
+bool SilhouetteInvert;
+static cl::opt<bool, true>
+EnableSilhouetteInvert("enable-arm-silhouette-invert",
+                       cl::desc("Enable Silhouette Invert"),
+                       cl::location(SilhouetteInvert),
+                       cl::init(false), cl::Hidden);
+
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
 EnableGlobalMerge("arm-global-merge", cl::Hidden,
@@ -570,7 +577,7 @@ void ARMPassConfig::addPreEmitPass() {
   if (EnableSilhouetteShadowStack) {
     addPass(createARMSilhouetteShadowStack());
   }
-  
+
   if (EnableSilhouetteStr2Strt) {
     addPass(createARMSilhouetteSTR2STRT());
   }
