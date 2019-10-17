@@ -16,10 +16,12 @@
 #ifndef ARM_SILHOUETTE_LABEL_CFI
 #define ARM_SILHOUETTE_LABEL_CFI
 
+#include "ARMSilhouetteInstrumentor.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 namespace llvm {
-  struct ARMSilhouetteLabelCFI : public MachineFunctionPass {
+  struct ARMSilhouetteLabelCFI
+      : public MachineFunctionPass, ARMSilhouetteInstrumentor {
     // pass identifier variable
     static char ID;
 

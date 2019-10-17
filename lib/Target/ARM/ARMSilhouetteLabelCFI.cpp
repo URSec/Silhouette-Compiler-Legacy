@@ -14,8 +14,8 @@
 //
 
 #include "ARM.h"
-#include "ARMSilhouetteLabelCFI.h"
 #include "ARMSilhouetteConvertFuncList.h"
+#include "ARMSilhouetteLabelCFI.h"
 #include "ARMTargetMachine.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -27,6 +27,9 @@
 #include <vector>
 
 using namespace llvm;
+
+extern bool SilhouetteInvert;
+extern bool SilhouetteStr2Strt;
 
 static DebugLoc DL;
 
@@ -45,87 +48,60 @@ ARMSilhouetteLabelCFI::getPassName() const {
 // Function: BackupReisters()
 //
 // Description:
-//   This function inserts instructions that store the content of two lo
-//   registers (R0 -- R7) onto the stack.  The second register should be
-//   greater than the first one.
+//   This function inserts instructions that store the content of a lo register
+//   (R0 -- R7) onto the stack.
 //
 // Inputs:
 //   MI   - A reference to the instruction before which to insert instructions.
-//   Reg1 - The first register to spill.
-//   Reg2 - The second register to spill.
+//   Reg1 - The register to spill.
 //
 static void
-BackupRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
+BackupRegister(MachineInstr & MI, unsigned Reg) {
   MachineBasicBlock & MBB = *MI.getParent();
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
-  //
-  // Build the following instruction sequence:
-  //
-  // sub  sp, #8
-  // strt reg1, [sp, #0]
-  // strt reg2, [sp, #4]
-  //
-  BuildMI(MBB, &MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
-  .addReg(ARM::SP)
-  .addImm(2)
-  .add(predOps(ARMCC::AL));
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg1)
-  .addReg(ARM::SP)
-  .addImm(0);
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg2)
-  .addReg(ARM::SP)
-  .addImm(4);
+  if (SilhouetteInvert || !SilhouetteStr2Strt) {
+    // Build a PUSH
+    BuildMI(MBB, &MI, DL, TII->get(ARM::tPUSH))
+    .add(predOps(ARMCC::AL))
+    .addReg(Reg);
+  } else {
+    //
+    // Build the following instruction sequence:
+    //
+    // sub  sp, #4
+    // strt reg, [sp, #0]
+    //
+    BuildMI(MBB, &MI, DL, TII->get(ARM::tSUBspi), ARM::SP)
+    .addReg(ARM::SP)
+    .addImm(1)
+    .add(predOps(ARMCC::AL));
+    BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg)
+    .addReg(ARM::SP)
+    .addImm(0);
+  }
 }
 
 //
 // Function: RestoreRegisters()
 //
 // Description:
-//   This function inserts instructions that load the content of two lo
-//   registers (R0 -- R7) from the stack.  The second register should be
-//   greater than the first one.
+//   This function inserts instructions that load the content of a lo register
+//   (R0 -- R7) from the stack.
 //
 // Inputs:
 //   MI   - A reference to the instruction before which to insert instructions.
-//   Reg1 - The first register to restore.
-//   Reg2 - The second register to restore.
+//   Reg - The register to restore.
 //
 static void
-RestoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2) {
+RestoreRegister(MachineInstr & MI, unsigned Reg) {
   MachineBasicBlock & MBB = *MI.getParent();
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
   // Generate a POP that pops out the register content from stack
   BuildMI(MBB, &MI, DL, TII->get(ARM::tPOP))
   .add(predOps(ARMCC::AL))
-  .addReg(Reg1)
-  .addReg(Reg2);
-}
-
-//
-// Function: GetFuncCodeSize()
-//
-// Description:
-//   This function computes the code size of a machine function.
-//
-// Input:
-//   MF - A reference to the target machine function.
-//
-// Return value:
-//   The size (in bytes) of the machine function.
-//
-static unsigned long
-GetFuncCodeSize(MachineFunction & MF) {
-  const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
-  unsigned long codeSize = 0ul;
-  for (MachineBasicBlock & MBB : MF) {
-    for (MachineInstr & MI : MBB) {
-      codeSize += TII->getInstSizeInBytes(MI);
-    }
-  }
-
-  return codeSize;
+  .addReg(Reg);
 }
 
 //
@@ -177,19 +153,17 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   MachineBasicBlock & MBB = *MI.getParent();
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
-  unsigned ScratchReg1 = Reg == ARM::R5 ? ARM::R4 : ARM::R5;
-  unsigned ScratchReg2 = Reg == ARM::R7 ? ARM::R6 : ARM::R7;
+  unsigned ScratchReg = Reg == ARM::R5 ? ARM::R4 : ARM::R5;
 
-  // Backup two scratch registers so that they are free to use
-  BackupRegisters(MI, ScratchReg1, ScratchReg2);
+  // Backup a scratch register so that it is free to use
+  BackupRegister(MI, ScratchReg);
 
   //
   // Build the following instruction sequence:
   //
   // bfc   reg, #0, #1          ; optional
-  // movw  scratch1, #CFI_LABEL
   // ldrh  scratch2, [reg, #0]
-  // cmp   scratch1, scratch2
+  // cmp   scratch1, #CFI_LABEL
   // it    ne
   // bfcne reg, #0, #32
   // orr   reg, reg, #1         ; optional
@@ -205,17 +179,14 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
     .addImm(~0x1)
     .add(predOps(ARMCC::AL));
   }
-  // Load the correct CFI label to @ScratchReg1
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2MOVi16), ScratchReg1)
-  .addImm(CFI_LABEL);
-  // Load the target CFI label to @ScratchReg2
-  BuildMI(MBB, &MI, DL, TII->get(ARM::t2LDRHi12), ScratchReg2)
+  // Load the target CFI label to @ScratchReg
+  BuildMI(MBB, &MI, DL, TII->get(ARM::t2LDRHi12), ScratchReg)
   .addReg(Reg)
   .addImm(0);
-  // Compare two labels
-  BuildMI(MBB, &MI, DL, TII->get(ARM::tCMPr))
-  .addReg(ScratchReg1)
-  .addReg(ScratchReg2);
+  // Compare the target label with the correct label
+  BuildMI(MBB, &MI, DL, TII->get(ARM::t2CMPri))
+  .addReg(ScratchReg)
+  .addImm(CFI_LABEL);
   // Clear all the bits of @Reg if two labels are not equal (a CFI violation)
   BuildMI(MBB, &MI, DL, TII->get(ARM::t2IT))
   .addImm(ARMCC::NE)
@@ -233,8 +204,8 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
     .add(condCodeOp());
   }
 
-  // Restore the two scratch registers
-  RestoreRegisters(MI, ScratchReg1, ScratchReg2);
+  // Restore the scratch register
+  RestoreRegister(MI, ScratchReg);
 }
 
 //
@@ -263,7 +234,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
-  unsigned long OldCodeSize = GetFuncCodeSize(MF);
+  unsigned long OldCodeSize = getFunctionCodeSize(MF);
 
   //
   // Iterate through all the instructions within the function to locate
@@ -367,7 +338,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
     }
   }
 
-  unsigned long NewCodeSize = GetFuncCodeSize(MF);
+  unsigned long NewCodeSize = getFunctionCodeSize(MF);
 
   // Output code size information
   std::error_code EC;
