@@ -166,12 +166,19 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
   insertInstsAfter(MI, NewMIs);
 
   // At last, replace the old POP with a new one that doesn't write to PC
-  if (MI.getOpcode() == ARM::t2LDMIA_RET) {
-    MI.RemoveOperand(0);  // ARM::SP
-    MI.RemoveOperand(1);  // ARM::SP
+  switch (MI.getOpcode()) {
+  case ARM::t2LDMIA_RET:
+    MI.setDesc(TII->get(ARM::t2LDMIA_UPD));
+    break;
+
+  case ARM::tPOP_RET:
+    MI.setDesc(TII->get(ARM::tPOP));
+    break;
+
+  default:
+    break;
   }
   MI.RemoveOperand(MI.getOperandNo(&PCMO));
-  MI.setDesc(TII->get(ARM::tPOP));
 }
 
 //
@@ -209,8 +216,8 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
       switch (MI.getOpcode()) {
       // Frame setup instructions in function prologue
       case ARM::tPUSH:
-      case ARM::t2STMDB:  // STMDB writing to SP! is treated same as PUSH
-        // LR can appear as a GPR, in which case we don't care
+      case ARM::t2STMDB_UPD:  // STMDB_UPD writing to SP! is treated same as PUSH
+        // LR can appear as a GPR not in prologue, in which case we don't care
         if (MI.getFlag(MachineInstr::FrameSetup)) {
           for (MachineOperand & MO : MI.operands()) {
             if (MO.isReg() && MO.getReg() == ARM::LR) {
@@ -224,6 +231,7 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
       // Frame destroy instructions in function epilogue
       case ARM::tPOP:
       case ARM::tPOP_RET:
+      case ARM::t2LDMIA_UPD:
       case ARM::t2LDMIA_RET:
         for (MachineOperand & MO : MI.operands()) {
           if (MO.isReg() && MO.getReg() == ARM::PC) {
