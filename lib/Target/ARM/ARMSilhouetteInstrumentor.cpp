@@ -29,32 +29,6 @@ using namespace llvm;
 static DebugLoc DL;
 
 //
-// Method: getFunctionCodeSize()
-//
-// Description:
-//   This method computes the code size of a machine function.
-//
-// Input:
-//   MF - A reference to the target machine function.
-//
-// Return value:
-//   The size (in bytes) of the machine function.
-//
-unsigned long
-ARMSilhouetteInstrumentor::getFunctionCodeSize(const MachineFunction & MF) {
-  const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
-
-  unsigned long CodeSize = 0ul;
-  for (const MachineBasicBlock & MBB : MF) {
-    for (const MachineInstr & MI : MBB) {
-      CodeSize += TII->getInstSizeInBytes(MI);
-    }
-  }
-
-  return CodeSize;
-}
-
-//
 // Method: getITBlockSize()
 //
 // Description:
