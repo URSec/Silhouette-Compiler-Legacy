@@ -45,7 +45,7 @@ ARMSilhouetteLabelCFI::getPassName() const {
 }
 
 //
-// Function: BackupReisters()
+// Function: BackupReister()
 //
 // Description:
 //   This function inserts instructions that store the content of a lo register
@@ -83,7 +83,7 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
 }
 
 //
-// Function: RestoreRegisters()
+// Function: RestoreRegister()
 //
 // Description:
 //   This function inserts instructions that load the content of a lo register

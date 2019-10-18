@@ -91,7 +91,7 @@ addImmediateToRegister(MachineInstr & MI, unsigned Reg, int64_t Imm,
 //   MI    - A reference to the store instruction before which to insert new
 //           instructions.
 //   Reg   - The destination register.
-//   Imm   - The immediate to be added.
+//   Imm   - The immediate to be subtracted.
 //   Insts - A reference to a deque that contains new instructions.
 //
 static void
