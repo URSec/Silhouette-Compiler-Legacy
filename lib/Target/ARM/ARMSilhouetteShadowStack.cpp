@@ -46,6 +46,38 @@ ARMSilhouetteShadowStack::getPassName() const {
 }
 
 //
+// Function: findTailJmp()
+//
+// Description:
+//   This function finds a TAILJMP instruction after a given instruction MI in
+//   the same basic block.
+//
+// Input:
+//   MI - A reference to the instruction after which to find TAILJMP.
+//
+// Return value:
+//   A pointer to TAILJMP if found, nullptr otherwise.
+//
+static MachineInstr *
+findTailJmp(MachineInstr & MI) {
+  MachineInstr * I = MI.getNextNode();
+  while (I != nullptr) {
+    switch (I->getOpcode()) {
+    case ARM::tTAILJMPr:
+    case ARM::tTAILJMPd:
+    case ARM::tTAILJMPdND:
+      return I;
+
+    default:
+      I = I->getNextNode();
+      break;
+    }
+  }
+
+  return nullptr;
+}
+
+//
 // Method: setupShadowStack()
 //
 // Description:
@@ -125,16 +157,17 @@ ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
 // Method: popFromShadowStack()
 //
 // Description:
-//   This method modifies a POP instruction to not write to PC and inserts new
-//   instructions that load the return address from the shadow stack into PC.
+//   This method modifies a POP instruction to not write to PC/LR and inserts
+//   new instructions that load the return address from the shadow stack into
+//   PC/LR.
 //
 // Input:
 //   MI   - A reference to a POP instruction after which to insert instructions.
-//   PCMO - A reference to the PC operand of the POP.
+//   PCLR - A reference to the PC or LR operand of the POP.
 //
 void
 ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
-                                             MachineOperand & PCMO) {
+                                             MachineOperand & PCLR) {
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
@@ -156,7 +189,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
                    .setMIFlag(MachineInstr::ShadowStack));
 
   // Generate an LDR from the shadow stack
-  NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRi12), ARM::PC)
+  NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRi12), PCLR.getReg())
                    .addReg(ARM::SP)
                    .addImm(offset)
                    .add(predOps(Pred, PredReg))
@@ -165,7 +198,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
   // Now insert these new instructions into the basic block
   insertInstsAfter(MI, NewMIs);
 
-  // At last, replace the old POP with a new one that doesn't write to PC
+  // At last, replace the old POP with a new one that doesn't write to PC/LR
   switch (MI.getOpcode()) {
   case ARM::t2LDMIA_RET:
     MI.setDesc(TII->get(ARM::t2LDMIA_UPD));
@@ -178,7 +211,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
   default:
     break;
   }
-  MI.RemoveOperand(MI.getOperandNo(&PCMO));
+  MI.RemoveOperand(MI.getOperandNo(&PCLR));
 }
 
 //
@@ -215,8 +248,13 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
     for (MachineInstr & MI : MBB) {
       switch (MI.getOpcode()) {
       // Frame setup instructions in function prologue
+      case ARM::t2STMDB_UPD:
+        // STMDB_UPD writing to SP! is treated same as PUSH
+        if (MI.getOperand(0).getReg() != ARM::SP) {
+          break;
+        }
+        LLVM_FALLTHROUGH;
       case ARM::tPUSH:
-      case ARM::t2STMDB_UPD:  // STMDB_UPD writing to SP! is treated same as PUSH
         // LR can appear as a GPR not in prologue, in which case we don't care
         if (MI.getFlag(MachineInstr::FrameSetup)) {
           for (MachineOperand & MO : MI.operands()) {
@@ -229,14 +267,26 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
         break;
 
       // Frame destroy instructions in function epilogue
-      case ARM::tPOP:
-      case ARM::tPOP_RET:
       case ARM::t2LDMIA_UPD:
       case ARM::t2LDMIA_RET:
+        // LDMIA_UPD writing to SP! is treated same as POP
+        if (MI.getOperand(0).getReg() != ARM::SP) {
+          break;
+        }
+        LLVM_FALLTHROUGH;
+      case ARM::tPOP:
+      case ARM::tPOP_RET:
+        // Handle 2 cases:
+        // (1) POP writing to LR followed by TAILJMP.
+        // (2) POP writing to PC
         for (MachineOperand & MO : MI.operands()) {
-          if (MO.isReg() && MO.getReg() == ARM::PC) {
-            popFromShadowStack(MI, MO);
-            break;
+          if (MO.isReg()) {
+            if ((MO.getReg() == ARM::LR && findTailJmp(MI) != nullptr) ||
+                MO.getReg() == ARM::PC) {
+              popFromShadowStack(MI, MO);
+              // Bail out as POP cannot write to both LR and PC
+              break;
+            }
           }
         }
         break;
