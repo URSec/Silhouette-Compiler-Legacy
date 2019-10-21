@@ -430,14 +430,15 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
-      // -imm8 might be 0, in which case we don't build SUB/ADD
-      if (Imm != 0) {
+      // -imm8 might be 0 (-256 counting the 'U' bit), in which case we don't
+      // build SUB/ADD
+      if (Imm != -256) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRT), SrcReg)
                          .addReg(BaseReg)
                          .addImm(0));
-      if (Imm != 0) {
+      if (Imm != -256) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, NewInsts);
       }
       break;
@@ -491,14 +492,15 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
         break;
       }
-      // -imm8 might be 0, in which case we don't build SUB/ADD
-      if (Imm != 0) {
+      // -imm8 might be 0 (-256 counting the 'U' bit), in which case we don't
+      // build SUB/ADD
+      if (Imm != -256) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRHT), SrcReg)
                          .addReg(BaseReg)
                          .addImm(0));
-      if (Imm != 0) {
+      if (Imm != -256) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, NewInsts);
       }
       break;
@@ -552,14 +554,15 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
       }
-      // -imm8 might be 0, in which case we don't build SUB/ADD
-      if (Imm != 0) {
+      // -imm8 might be 0 (-256 counting the 'U' bit), in which case we don't
+      // build SUB/ADD
+      if (Imm != -256) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRBT), SrcReg)
                          .addReg(BaseReg)
                          .addImm(0));
-      if (Imm != 0) {
+      if (Imm != -256) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, NewInsts);
       }
       break;
