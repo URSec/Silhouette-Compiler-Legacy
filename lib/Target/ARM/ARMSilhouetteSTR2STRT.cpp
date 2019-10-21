@@ -15,6 +15,7 @@
 
 #include "ARM.h"
 #include "ARMSilhouetteConvertFuncList.h"
+#include "ARMSilhouetteSFI.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -27,6 +28,8 @@
 #include <deque>
 
 using namespace llvm;
+
+extern SilhouetteSFIOption SilhouetteSFI;
 
 char ARMSilhouetteSTR2STRT::ID = 0;
 
@@ -271,6 +274,12 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       case ARM::t2STRDi8:    // A7.7.163 Encoding T1; no write-back
       case ARM::t2STRD_PRE:  // A7.7.163 Encoding T1; pre-indexed
       case ARM::t2STRD_POST: // A7.7.163 Encoding T1; post-indexed
+        // Lightweight stores; leave them as is only if we are using full SFI
+        if (SilhouetteSFI != FullSFI) {
+          Stores.push_back(&MI);
+        }
+        break;
+
       // Floating-point store
       case ARM::VSTRD:       // A7.7.256 Encoding T1
       case ARM::VSTRS:       // A7.7.256 Encoding T2
@@ -289,7 +298,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       case ARM::VSTMSIA:     // A7.7.255 Encoding T2; increment after; no write-back
       case ARM::VSTMSIA_UPD: // A7.7.255 Encoding T2; increment after; with write-back
       case ARM::VSTMSDB_UPD: // A7.7.255 Encoding T2; decrement before; with write-back
-        Stores.push_back(&MI);
+        // Heavyweight stores; instrument them only if we are not using SFI
+        if (SilhouetteSFI == NoSFI) {
+          Stores.push_back(&MI);
+        }
         break;
 
       case ARM::INLINEASM:

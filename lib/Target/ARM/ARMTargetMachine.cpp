@@ -18,6 +18,7 @@
 #include "ARMSilhouetteCFI.h"
 #include "ARMSilhouetteLabelCFI.h"
 #include "ARMSilhouetteMemOverhead.h"
+#include "ARMSilhouetteSFI.h"
 #include "ARMSilhouetteSTR2STRT.h"
 #include "ARMSilhouetteShadowStack.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
@@ -109,6 +110,16 @@ EnableSilhouetteInvert("enable-arm-silhouette-invert",
                        cl::desc("Enable Silhouette Invert"),
                        cl::location(SilhouetteInvert),
                        cl::init(false), cl::Hidden);
+
+SilhouetteSFIOption SilhouetteSFI;
+static cl::opt<SilhouetteSFIOption, true>
+EnableSilhouetteSFI("enable-arm-silhouette-sfi",
+                    cl::desc("Enable Silhouette SFI"),
+                    cl::location(SilhouetteSFI),
+                    cl::init(NoSFI), cl::Hidden,
+                    cl::values(clEnumValN(NoSFI, "none", "No SFI"),
+                               clEnumValN(SelSFI, "selective", "Selective SFI"),
+                               clEnumValN(FullSFI, "full", "Full SFI")));
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -576,6 +587,10 @@ void ARMPassConfig::addPreEmitPass() {
 
   if (EnableSilhouetteShadowStack) {
     addPass(createARMSilhouetteShadowStack());
+  }
+
+  if (EnableSilhouetteSFI != NoSFI) {
+    addPass(createARMSilhouetteSFI());
   }
 
   if (EnableSilhouetteStr2Strt) {
