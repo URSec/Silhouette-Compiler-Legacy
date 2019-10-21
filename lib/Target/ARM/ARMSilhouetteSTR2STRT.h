@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This pass converts all normal STR instructions to the STRT family 
+// This pass converts all regular store instructions to the unprivileged store
 // instructions.
 //
 //===----------------------------------------------------------------------===//
@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 namespace llvm {
+
   struct ARMSilhouetteSTR2STRT
       : public MachineFunctionPass, ARMSilhouetteInstrumentor {
     // pass identifier variable

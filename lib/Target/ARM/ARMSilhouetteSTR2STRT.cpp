@@ -457,11 +457,13 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                          .addImm(Imm));
       break;
 
-    // A7.7.167 Encoding T2: STRH<c>.W <Rt>,[<Rn>{,#<imm12>}]
+    // A7.7.167 Encoding T2: STRH<c>.W <Rt>,[<Rn>,#<imm12>]
     case ARM::t2STRHi12:
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
+      // SP has to be 4 byte aligned; if the easy ways won't apply,
+      // special-case it
       if (BaseReg == ARM::SP && Imm > 255 && Imm % 4 != 0) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
         break;
@@ -483,6 +485,8 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
+      // SP has to be 4 byte aligned; if the easy ways won't apply,
+      // special-case it
       if (BaseReg == ARM::SP && Imm % 4 != 0) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
         break;
@@ -519,6 +523,8 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
+      // SP has to be 4 byte aligned; if the easy ways won't apply,
+      // special-case it
       if (BaseReg == ARM::SP && Imm > 255 & Imm % 4 != 0) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
@@ -540,6 +546,8 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
+      // SP has to be 4 byte aligned; if the easy ways won't apply,
+      // special-case it
       if (BaseReg == ARM::SP && Imm % 4 != 0) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
