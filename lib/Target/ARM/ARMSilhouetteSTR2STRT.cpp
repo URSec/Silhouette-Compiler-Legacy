@@ -42,65 +42,6 @@ ARMSilhouetteSTR2STRT::getPassName() const {
 }
 
 //
-// Function: addImmediateToRegister()
-//
-// Description:
-//   This function builds an ADD/SUB that adds an immediate to a register and
-//   puts the new instruction(s) at the end of a deque.
-//
-// Inputs:
-//   MI    - A reference to the store instruction before which to insert new
-//           instructions.
-//   Reg   - The destination register.
-//   Imm   - The immediate to be added.
-//   Insts - A reference to a deque that contains new instructions.
-//
-static void
-addImmediateToRegister(MachineInstr & MI, unsigned Reg, int64_t Imm,
-                       std::deque<MachineInstr *> & Insts) {
-  assert((Imm > -4096 && Imm < 4096) && "Immediate too large!");
-  assert((Reg != ARM::SP || Imm % 4 == 0) &&
-          "Cannot add unaligned immediate to SP!");
-
-  MachineFunction & MF = *MI.getMF();
-  const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
-
-  unsigned PredReg;
-  ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
-
-  unsigned addOpc = Imm < 0 ? ARM::t2SUBri12 : ARM::t2ADDri12;
-  if (Reg == ARM::SP && Imm > -512 && Imm < 512) {
-    addOpc = Imm < 0 ? ARM::tSUBspi : ARM::tADDspi;
-    Imm >>= 2;
-  }
-
-  Insts.push_back(BuildMI(MF, DL, TII->get(addOpc), Reg)
-                  .addReg(Reg)
-                  .addImm(Imm < 0 ? -Imm : Imm)
-                  .add(predOps(Pred, PredReg)));
-}
-
-//
-// Function: subtractImmediateFromRegister()
-//
-// Description:
-//   This function builds a SUB/ADD that subtracts an immediate from a register
-//   and puts the new instruction(s) at the end of a deque.
-//
-// Inputs:
-//   MI    - A reference to the store instruction before which to insert new
-//           instructions.
-//   Reg   - The destination register.
-//   Imm   - The immediate to be subtracted.
-//   Insts - A reference to a deque that contains new instructions.
-//
-static void
-subtractImmediateFromRegister(MachineInstr & MI, unsigned Reg, int64_t Imm,
-                              std::deque<MachineInstr *> & Insts) {
-  addImmediateToRegister(MI, Reg, -Imm, Insts);
-}
-
-//
 // Function: backupRegisters()
 //
 // Description:
