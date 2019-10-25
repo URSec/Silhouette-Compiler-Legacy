@@ -480,7 +480,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       Imm = MI.getOperand(2).getImm();
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
-      if (BaseReg == ARM::SP && Imm > 255 & Imm % 4 != 0) {
+      if (BaseReg == ARM::SP && (Imm > 255) && Imm % 4 != 0) {
         handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
       }
