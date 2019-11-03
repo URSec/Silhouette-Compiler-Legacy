@@ -17,7 +17,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 namespace llvm {
-  static const int ShadowStackOffset = 4092;
+  static const int ShadowStackOffset = 8188;
 
   struct ARMSilhouetteShadowStack
       : public MachineFunctionPass, ARMSilhouetteInstrumentor {

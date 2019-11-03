@@ -171,10 +171,12 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  // We cannot support an offset that is negative or beyond 4096 because we
-  // don't get to adjust it back after loading the PC from the shadow stack.
+  // Offset that is negative or beyond 4096 is not recommended
+  // and is only experimentally supported.
   int offset = ShadowStackOffset;
-  assert((offset > 0 && offset < 4096) && "Shadow stack offset not fit in range!");
+  int offsetToGo = offset >= 0 ? offset : -offset;
+  unsigned addOpc = offset >= 0 ? ARM::t2ADDri12 : ARM::t2SUBri12;
+  unsigned subOpc = offset >= 0 ? ARM::t2SUBri12 : ARM::t2ADDri12;
 
   unsigned PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
@@ -188,12 +190,58 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
                    .add(predOps(Pred, PredReg))
                    .setMIFlag(MachineInstr::ShadowStack));
 
+  // Adjust SP properly
+  while (offsetToGo > 4092) {
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(addOpc), ARM::SP)
+                     .addReg(ARM::SP)
+                     .addImm(4092)
+                     .add(predOps(Pred, PredReg))
+                     .setMIFlag(MachineInstr::ShadowStack));
+    offsetToGo -= 4092;
+  }
+  if (offset < 0 || (SilhouetteInvert && offsetToGo > 255)) {
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(addOpc), ARM::SP)
+                     .addReg(ARM::SP)
+                     .addImm(offsetToGo)
+                     .add(predOps(Pred, PredReg))
+                     .setMIFlag(MachineInstr::ShadowStack));
+    offsetToGo = 0;
+  }
+
   // Generate an LDR from the shadow stack
-  NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRi12), PCLR.getReg())
+  NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRi12), ARM::LR)
                    .addReg(ARM::SP)
-                   .addImm(offset)
+                   .addImm(offsetToGo)
                    .add(predOps(Pred, PredReg))
                    .setMIFlag(MachineInstr::ShadowStack));
+
+  // Restore SP
+  offsetToGo = (offset >= 0 ? offset : -offset) - offsetToGo;
+  // Adjust SP to skip PC on the stack
+  while (offsetToGo > 4092) {
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(subOpc), ARM::SP)
+                     .addReg(ARM::SP)
+                     .addImm(4092)
+                     .add(predOps(Pred, PredReg))
+                     .setMIFlag(MachineInstr::ShadowStack));
+    offsetToGo -= 4092;
+  }
+  if (offset != 0 || (SilhouetteInvert && offsetToGo > 255)) {
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(subOpc), ARM::SP)
+                     .addReg(ARM::SP)
+                     .addImm(offsetToGo)
+                     .add(predOps(Pred, PredReg))
+                     .setMIFlag(MachineInstr::ShadowStack));
+    offsetToGo = 0;
+  }
+
+  // If the original destination register is PC, move LR to PC
+  if (PCLR.getReg() == ARM::PC) {
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::tMOVr), ARM::PC)
+                    .addReg(ARM::LR, RegState::Kill)
+                    .add(predOps(Pred, PredReg))
+                    .setMIFlag(MachineInstr::ShadowStack));
+  }
 
   // Now insert these new instructions into the basic block
   insertInstsAfter(MI, NewMIs);
