@@ -71,6 +71,7 @@ findTailJmp(MachineInstr & MI) {
     case ARM::tTAILJMPr:
     case ARM::tTAILJMPd:
     case ARM::tTAILJMPdND:
+    case ARM::tBX_RET:  // This is also the case!
       return I;
 
     default:
