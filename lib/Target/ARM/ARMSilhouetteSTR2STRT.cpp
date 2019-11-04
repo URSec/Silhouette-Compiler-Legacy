@@ -348,7 +348,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
     case ARM::tSTRspi:
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
-      Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm5:'00', 32) yet
+      Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm8:'00', 32) yet
       // imm8:'00' might go beyond 255; we surround STRT with ADD/SUB
       if (Imm > 255) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);

@@ -304,7 +304,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     // A7.7.158 Encoding T2: STR<c> <Rt>,[SP,#<imm8>]
     case ARM::tSTRspi:
       BaseReg = MI.getOperand(1).getReg();
-      Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm5:'00', 32) yet
+      Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm:'00', 32) yet
       // Add, bit-mask, store, and subtract
       if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
