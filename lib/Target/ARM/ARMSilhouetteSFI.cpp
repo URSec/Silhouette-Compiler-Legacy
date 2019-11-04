@@ -306,12 +306,12 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm5:'00', 32) yet
       // Add, bit-mask, store, and subtract
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(2).setImm(0);
       }
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
@@ -321,12 +321,12 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm() << 1; // Not ZeroExtend(imm5:'0', 32) yet
       // Add, bit-mask, store, and subtract
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(2).setImm(0);
       }
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
@@ -336,12 +336,12 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
       // Add, bit-mask, store, and subtract
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(2).setImm(0);
       }
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
@@ -356,7 +356,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       Imm = MI.getOperand(2).getImm();
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
-      if (BaseReg == ARM::SP && Imm % 4 != 0) {
+      if (BaseReg == ARM::SP) {
         handleSPUnalignedImmediate(MI, MI.getOperand(0), MI.getOperand(1),
                                    MI.getOperand(2), InstsBefore, InstsAfter);
         break;
@@ -382,7 +382,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       Imm = MI.getOperand(2).getImm();
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
-      if (BaseReg == ARM::SP && Imm % 4 != 0) {
+      if (BaseReg == ARM::SP) {
         handleSPUnalignedImmediate(MI, MI.getOperand(0), MI.getOperand(1),
                                    MI.getOperand(2), InstsBefore, InstsAfter);
         // Clear the 'U' bit; otherwise it becomes an unprivileged store
@@ -410,7 +410,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(0).getReg();
       Imm = MI.getOperand(3).getImm();
       // Pre-indexed stores: add, bit-mask, and store
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(3).setImm(0);
       }
@@ -487,12 +487,12 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(2).getReg();
       Imm = MI.getOperand(3).getImm(); // Already ZeroExtend(imm8:'00', 32)
       // Add, bit-mask, store, and subtract
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(3).setImm(0);
       }
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
@@ -502,7 +502,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(2).getReg();
       Imm = MI.getOperand(3).getImm(); // Already ZeroExtend(imm8:'00', 32)
       // Pre-indexed store: add, bit-mask, and store
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(3).setImm(0);
       }
@@ -527,12 +527,12 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
         Imm = -Imm;
       }
       // Add, bit-mask, store, and subtract
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(2).setImm(ARM_AM::getAM5Opc(ARM_AM::AddrOpc::add, 0));
       }
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0) {
+      if (Imm != 0 && BaseReg != ARM::SP) {
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
