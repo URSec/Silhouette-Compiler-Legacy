@@ -305,6 +305,11 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
+#if 1
+  errs() << "[SS] Stack frame size: " << MF.getName() << ": "
+         << MF.getFrameInfo().getStackSize() << "\n";
+#endif
+
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
 
   for (MachineBasicBlock & MBB : MF) {
