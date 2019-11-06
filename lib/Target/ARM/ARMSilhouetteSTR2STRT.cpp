@@ -155,23 +155,26 @@ restoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2,
 }
 
 //
-// Function: handleSPUnalignedImmediate()
+// Function: handleSPWithUncommonImm()
 //
 // Description:
 //   This function takes care of cases where the base register of a store is SP
-//   and the immediate offset is not aligned by 4.
+//   and the immediate offset is not aligned by 4 or greater than 255.
 //
 // Inputs:
-//   MI     - A reference to a store instruction before which to insert new
+//   MI      - A reference to a store instruction before which to insert new
 //            instructions.
-//   SrcReg - The source register of the store.
-//   Imm    - The immediate offset of the store.
-//   strOpc - The opcode of the new unprivileged store.
-//   Insts  - A reference to a deque that contains new instructions.
+//   SrcReg  - The source register of the store.
+//   SrcReg2 - The second register of the store in case this is a
+//             double world store.
+//   Imm     - The immediate offset of the store.
+//   strOpc  - The opcode of the new unprivileged store.
+//   Insts   - A reference to a deque that contains new instructions.
 //
 static void
-handleSPUnalignedImmediate(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
-                           unsigned strOpc, std::deque<MachineInstr *> & Insts) {
+handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
+                       unsigned strOpc, std::deque<MachineInstr *> & Insts,
+                       unsigned SrcReg2 = ARM::NoRegister) {
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
@@ -179,11 +182,12 @@ handleSPUnalignedImmediate(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   // Save a scratch register onto the stack
-  unsigned ScratchReg = SrcReg == ARM::R0 ? ARM::R1 : ARM::R0;
+  unsigned ScratchReg = ARM::R0;
+  while (ScratchReg == SrcReg || ScratchReg == SrcReg2) ScratchReg++;
   backupRegisters(MI, ScratchReg, ARM::NoRegister, Insts);
   Imm += 4; // Compensate for SP decrement
 
-  // Add SP with the unaligned immediate to the scratch register
+  // Add SP with the uncommon immediate to the scratch register
   unsigned addOpc = Imm < 0 ? ARM::t2SUBri12 : ARM::t2ADDri12;
   Insts.push_back(BuildMI(MF, DL, TII->get(addOpc), ScratchReg)
                   .addReg(ARM::SP)
@@ -194,6 +198,11 @@ handleSPUnalignedImmediate(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
   Insts.push_back(BuildMI(MF, DL, TII->get(strOpc), SrcReg)
                   .addReg(ScratchReg)
                   .addImm(0));
+  if (SrcReg2 != ARM::NoRegister) {
+    Insts.push_back(BuildMI(MF, DL, TII->get(strOpc), SrcReg2)
+        .addReg(ScratchReg)
+        .addImm(4));
+  }
 
   // Restore the scratch register from the stack
   restoreRegisters(MI, ScratchReg, ARM::NoRegister, Insts);
@@ -419,7 +428,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
       if (BaseReg == ARM::SP && Imm > 255 && Imm % 4 != 0) {
-        handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
         break;
       }
       // imm12 might go beyond 255; we surround STRHT with ADD/SUB
@@ -442,7 +451,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
       if (BaseReg == ARM::SP && Imm % 4 != 0) {
-        handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
         break;
       }
       // -imm8 might be 0 (-256 counting the 'U' bit), in which case we don't
@@ -481,7 +490,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
       if (BaseReg == ARM::SP && (Imm > 255) && Imm % 4 != 0) {
-        handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
       }
       // imm12 might go beyond 255; we surround STRBT with ADD/SUB
@@ -504,7 +513,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       // SP has to be 4 byte aligned; if the easy ways won't apply,
       // special-case it
       if (BaseReg == ARM::SP && Imm % 4 != 0) {
-        handleSPUnalignedImmediate(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
       }
       // -imm8 might be 0 (-256 counting the 'U' bit), in which case we don't
