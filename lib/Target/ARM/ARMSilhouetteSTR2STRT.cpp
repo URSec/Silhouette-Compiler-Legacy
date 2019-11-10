@@ -173,8 +173,8 @@ restoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2,
 //
 static void
 handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
-                       unsigned strOpc, std::deque<MachineInstr *> & Insts,
-                       unsigned SrcReg2 = ARM::NoRegister) {
+                        unsigned strOpc, std::deque<MachineInstr *> & Insts,
+                        unsigned SrcReg2 = ARM::NoRegister) {
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
@@ -200,8 +200,8 @@ handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
                   .addImm(0));
   if (SrcReg2 != ARM::NoRegister) {
     Insts.push_back(BuildMI(MF, DL, TII->get(strOpc), SrcReg2)
-        .addReg(ScratchReg)
-        .addImm(4));
+                    .addReg(ScratchReg)
+                    .addImm(4));
   }
 
   // Restore the scratch register from the stack
@@ -360,14 +360,12 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm8:'00', 32) yet
       // imm8:'00' might go beyond 255; we surround STRT with ADD/SUB
       if (Imm > 255) {
-        addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRT, NewInsts);
+        break;
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRT), SrcReg)
                          .addReg(BaseReg)
-                         .addImm(Imm > 255 ? 0 : Imm));
-      if (Imm > 255) {
-        subtractImmediateFromRegister(MI, BaseReg, Imm, NewInsts);
-      }
+                         .addImm(Imm));
       break;
 
     // A7.7.158 Encoding T3: STR<c>.W <Rt>,[<Rn>,#<imm12>]
@@ -375,7 +373,11 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
-      // imm12 might go beyond 255; we surround STRT with ADD/SUB
+      // imm12 might go beyond 255.
+      if (BaseReg == ARM::SP && Imm > 255) {
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRT, NewInsts);
+        break;
+      }
       if (Imm > 255) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
       }
@@ -392,6 +394,12 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
+      if (BaseReg == ARM::SP && Imm % 4 != 0) {
+        // This case shouldn't happen as this store stores a word.
+        // What we do here is a "just in case".
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRT, NewInsts);
+        break;
+      }
       // -imm8 might be 0 (-256 counting the 'U' bit), in which case we don't
       // build SUB/ADD
       if (Imm != -256) {
@@ -425,15 +433,15 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
-      // SP has to be 4 byte aligned; if the easy ways won't apply,
-      // special-case it
-      if (BaseReg == ARM::SP && Imm > 255 && Imm % 4 != 0) {
+      // Special case.
+      if (BaseReg == ARM::SP && Imm > 255) {
         handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRHT, NewInsts);
         break;
       }
-      // imm12 might go beyond 255; we surround STRHT with ADD/SUB
+      // imm12 might go beyond 255.
       if (Imm > 255) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
+
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRHT), SrcReg)
                          .addReg(BaseReg)
@@ -487,13 +495,11 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       SrcReg = MI.getOperand(0).getReg();
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
-      // SP has to be 4 byte aligned; if the easy ways won't apply,
-      // special-case it
-      if (BaseReg == ARM::SP && (Imm > 255) && Imm % 4 != 0) {
+      if (BaseReg == ARM::SP && Imm > 255) {
         handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRBT, NewInsts);
         break;
       }
-      // imm12 might go beyond 255; we surround STRBT with ADD/SUB
+      // imm12 might go beyond 255; surround STRBT with ADD/SUB
       if (Imm > 255) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
       }
@@ -774,9 +780,13 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(2).getReg();
       Imm = MI.getOperand(3).getImm(); // Already ZeroExtend(imm8:'00', 32)
       Imm2 = Imm;
-      // imm8 could be either negative or beyond 251, in which cases we
-      // surround 2 STRTs with ADD/SUB.  251 comes from the fact that the
-      // immediate of the second STRT cannot go beyond 255.
+      // 251 comes from the fact that the immediate of the second STRT cannot
+      // go beyond 255.
+      if (BaseReg == ARM::SP && Imm > 251) {
+        handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRT, NewInsts, SrcReg2);
+        break;
+      }
+      // When Imm is negative, add a pair of add/sub to handle this store.
       if (Imm < 0 || Imm > 251) {
         addImmediateToRegister(MI, BaseReg, Imm, NewInsts);
         Imm2 = 0;
