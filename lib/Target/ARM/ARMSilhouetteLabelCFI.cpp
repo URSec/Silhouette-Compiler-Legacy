@@ -33,6 +33,9 @@ extern bool SilhouetteStr2Strt;
 
 static DebugLoc DL;
 
+// A global counter for number of spills
+static unsigned long globalNumOfSpills = 0;
+
 char ARMSilhouetteLabelCFI::ID = 0;
 
 ARMSilhouetteLabelCFI::ARMSilhouetteLabelCFI()
@@ -65,6 +68,10 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
     BuildMI(MBB, &MI, DL, TII->get(ARM::tPUSH))
     .add(predOps(ARMCC::AL))
     .addReg(Reg);
+
+    // increase the spill counter
+    globalNumOfSpills ++ ;
+
   } else {
     //
     // Build the following instruction sequence:
@@ -79,6 +86,10 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
     BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg)
     .addReg(ARM::SP)
     .addImm(0);
+
+    // increase the spill counter
+    globalNumOfSpills ++ ;
+
   }
 }
 
@@ -235,7 +246,10 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
 #endif
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
-
+  
+  unsigned long NumOfSpills = globalNumOfSpills;
+  
+  
   //
   // Iterate through all the instructions within the function to locate
   // indirect branches and calls.
@@ -345,6 +359,14 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   raw_fd_ostream MemStat("./code_size_cfi.stat", EC,
                          sys::fs::OpenFlags::F_Append);
   MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
+  
+  // count the number of spills since the beginning of this function
+  // output to file
+  NumOfSpills = globalNumOfSpills - NumOfSpills;
+  raw_fd_ostream SpillStat("./spills_cfi.stat", EC,
+                         sys::fs::OpenFlags::F_Append);
+  SpillStat << MF.getName() << ":" << NumOfSpills << "\n";
+
 
   // Output jump table jump information
   raw_fd_ostream JTJStat("./jump_table_jump.stat", EC,
