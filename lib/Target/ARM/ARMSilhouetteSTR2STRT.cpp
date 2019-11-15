@@ -35,6 +35,9 @@ char ARMSilhouetteSTR2STRT::ID = 0;
 
 static DebugLoc DL;
 
+// A global counter for number of spills
+static unsigned long globalNumOfSpills = 0;
+
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT()
     : MachineFunctionPass(ID) {
 }
@@ -78,6 +81,12 @@ backupRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2,
   if (Reg2 != ARM::NoRegister) {
     ++numRegs;
   }
+
+  // increase the spill counter
+  globalNumOfSpills += numRegs ;
+  errs() << "[SP]===: " << __FUNCTION__ <<
+	      ": globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";
+
 
   //
   // Build the following instruction sequence:
@@ -294,6 +303,8 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
+
+  unsigned long NumOfSpills = globalNumOfSpills;
 
   // Iterate over all machine instructions to find stores
   std::deque<MachineInstr *> Stores;
@@ -1408,6 +1419,19 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
   raw_fd_ostream MemStat("./code_size_sp.stat", EC,
                          sys::fs::OpenFlags::F_Append);
   MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
+
+  // count the number of spills since the beginning of this function
+  // output to file
+  NumOfSpills = globalNumOfSpills - NumOfSpills;
+#if 0
+  errs() << "[SP]: " << __FUNCTION__ <<
+           ":\n after pass: NumOfSpills: " << std::to_string(NumOfSpills) << 
+           ":\n\t globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";
+#endif
+
+  raw_fd_ostream SpillStat("./spills_sp.stat", EC,
+		                              sys::fs::OpenFlags::F_Append);
+  SpillStat << MF.getName() << ":" << NumOfSpills << "\n";
 
   return true;
 }

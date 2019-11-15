@@ -34,6 +34,9 @@ char ARMSilhouetteSFI::ID = 0;
 
 static DebugLoc DL;
 
+// A global counter for number of spills
+static unsigned long globalNumOfSpills = 0;
+
 ARMSilhouetteSFI::ARMSilhouetteSFI()
     : MachineFunctionPass(ID) {
 }
@@ -143,6 +146,11 @@ handleSPUnalignedImmediate(MachineInstr & MI, MachineOperand & SrcMO,
   // Save a scratch register onto the stack.  Note that we are introducing a
   // new store here, so this store needs to be instrumented as well.
   unsigned ScratchReg = SrcMO.getReg() == ARM::R0 ? ARM::R1 : ARM::R0;
+  globalNumOfSpills ++;
+
+  errs() << "[SFI]: ===: " << __FUNCTION__ <<
+	    ": globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";
+
   int64_t Imm = ImmMO.getImm();
   doBitmasking(MI, ARM::SP, InstsBefore);
   InstsBefore.push_back(BuildMI(MF, DL, TII->get(ARM::tPUSH))
@@ -201,6 +209,8 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
+
+  unsigned long NumOfSpills = globalNumOfSpills;
 
   // Iterate over all machine instructions to find stores
   std::deque<MachineInstr *> Stores;
@@ -591,6 +601,20 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
                          sys::fs::OpenFlags::F_Append);
   MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
 
+
+  // count the number of spills since the beginning of this function
+  // output to file
+  NumOfSpills = globalNumOfSpills - NumOfSpills;
+#if 0
+  errs() << "[SFI]: " << __FUNCTION__ <<
+	    ":\n\t after pass: NumOfSpills: " << std::to_string(NumOfSpills) << 
+	    ":\n\t\t globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";
+#endif
+ 
+  raw_fd_ostream SpillStat("./spills_sfi.stat", EC,
+                    sys::fs::OpenFlags::F_Append);
+                    SpillStat << MF.getName() << ":" << NumOfSpills << "\n";
+    
   return true;
 }
 
