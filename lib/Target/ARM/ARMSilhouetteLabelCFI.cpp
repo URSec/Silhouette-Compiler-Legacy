@@ -91,6 +91,9 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
     globalNumOfSpills ++ ;
 
   }
+  errs() << "===: " << __FILE__  << ": " << __FUNCTION__ <<
+    ": globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";
+
 }
 
 //
@@ -246,10 +249,9 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
 #endif
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
-  
+
   unsigned long NumOfSpills = globalNumOfSpills;
-  
-  
+
   //
   // Iterate through all the instructions within the function to locate
   // indirect branches and calls.
