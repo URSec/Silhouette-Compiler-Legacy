@@ -13,6 +13,8 @@
 //===----------------------------------------------------------------------===//
 //
 
+#define DEBUG_TYPE "arm-silhouette-SFI"
+
 #include "ARM.h"
 #include "ARMSilhouetteConvertFuncList.h"
 #include "ARMSilhouetteSFI.h"
@@ -23,6 +25,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/ADT/Statistic.h"
 
 #include <deque>
 
@@ -36,6 +39,8 @@ static DebugLoc DL;
 
 // A global counter for number of spills
 static unsigned long globalNumOfSpills = 0;
+
+STATISTIC(NumOfSpillsSFI, "The # of spills in SFI");
 
 ARMSilhouetteSFI::ARMSilhouetteSFI()
     : MachineFunctionPass(ID) {
@@ -147,6 +152,9 @@ handleSPUnalignedImmediate(MachineInstr & MI, MachineOperand & SrcMO,
   // new store here, so this store needs to be instrumented as well.
   unsigned ScratchReg = SrcMO.getReg() == ARM::R0 ? ARM::R1 : ARM::R0;
   globalNumOfSpills ++;
+
+  NumOfSpillsSFI ++;
+
 
   errs() << "[SFI]: ===: " << __FUNCTION__ <<
 	    ": globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";

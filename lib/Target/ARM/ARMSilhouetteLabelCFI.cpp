@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
+#define DEBUG_TYPE "arm-silhouette-labelCFI"
 
 #include "ARM.h"
 #include "ARMSilhouetteConvertFuncList.h"
@@ -23,6 +24,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/ADT/Statistic.h"
 
 #include <vector>
 
@@ -35,6 +37,8 @@ static DebugLoc DL;
 
 // A global counter for number of spills
 static unsigned long globalNumOfSpills = 0;
+
+STATISTIC(NumOfSpillsLabelCFI, "The # of spills in Label CFI");
 
 char ARMSilhouetteLabelCFI::ID = 0;
 
@@ -72,6 +76,8 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
     // increase the spill counter
     globalNumOfSpills ++ ;
 
+    NumOfSpillsLabelCFI ++;
+
   } else {
     //
     // Build the following instruction sequence:
@@ -89,6 +95,8 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
 
     // increase the spill counter
     globalNumOfSpills ++ ;
+
+    NumOfSpillsLabelCFI ++;
 
   }
   errs() << "===: " << __FILE__  << ": " << __FUNCTION__ <<

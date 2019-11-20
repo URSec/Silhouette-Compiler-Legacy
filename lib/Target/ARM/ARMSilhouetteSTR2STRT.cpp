@@ -13,6 +13,8 @@
 //===----------------------------------------------------------------------===//
 //
 
+#define DEBUG_TYPE "arm-silhouette-SP"
+
 #include "ARM.h"
 #include "ARMSilhouetteConvertFuncList.h"
 #include "ARMSilhouetteSFI.h"
@@ -24,6 +26,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/ADT/Statistic.h"
 
 #include <deque>
 
@@ -37,6 +40,8 @@ static DebugLoc DL;
 
 // A global counter for number of spills
 static unsigned long globalNumOfSpills = 0;
+
+STATISTIC(NumOfSpillsSP, "The # of spills in SP");
 
 ARMSilhouetteSTR2STRT::ARMSilhouetteSTR2STRT()
     : MachineFunctionPass(ID) {
@@ -83,7 +88,10 @@ backupRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2,
   }
 
   // increase the spill counter
-  globalNumOfSpills += numRegs ;
+  globalNumOfSpills += numRegs;
+  
+  NumOfSpillsSP += numRegs;
+
   errs() << "[SP]===: " << __FUNCTION__ <<
 	      ": globalNumOfSpills: " << std::to_string(globalNumOfSpills) << "\n";
 

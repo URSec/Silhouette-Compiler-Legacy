@@ -115,7 +115,9 @@ struct Config {
   bool DebugPassManager = false;
 
   /// Statistics output file path.
-  std::string StatsFile;
+  // LLM: this is a hack to let LTO 'always' output stats file
+  // because -lto-stats-file option does not work.
+  std::string StatsFile = "default.stats";
 
   bool ShouldDiscardValueNames = true;
   DiagnosticHandlerFunction DiagHandler;
