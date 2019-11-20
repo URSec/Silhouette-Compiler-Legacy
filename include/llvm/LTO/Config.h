@@ -117,7 +117,7 @@ struct Config {
   /// Statistics output file path.
   // LLM: this is a hack to let LTO 'always' output stats file
   // because -lto-stats-file option does not work.
-  std::string StatsFile = "default.stats";
+  std::string StatsFile = "stats.json";
 
   bool ShouldDiscardValueNames = true;
   DiagnosticHandlerFunction DiagHandler;
