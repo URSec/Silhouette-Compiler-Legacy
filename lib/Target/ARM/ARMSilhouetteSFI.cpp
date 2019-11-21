@@ -499,19 +499,19 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
 
     // A7.7.163 Encoding T1: STRD<c> <Rt>,<Rt2>,[<Rn>,#+/-<imm8>]!
     case ARM::t2STRD_PRE:
-      BaseReg = MI.getOperand(2).getReg();
-      Imm = MI.getOperand(3).getImm(); // Already ZeroExtend(imm8:'00', 32)
+      BaseReg = MI.getOperand(0).getReg();
+      Imm = MI.getOperand(4).getImm(); // Already ZeroExtend(imm8:'00', 32)
       // Pre-indexed store: add, bit-mask, and store
       if (Imm != 0 && BaseReg != ARM::SP) {
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
-        MI.getOperand(3).setImm(0);
+        MI.getOperand(4).setImm(0);
       }
       doBitmasking(MI, BaseReg, InstsBefore);
       break;
 
     // A7.7.163 Encoding T1: STRD<c> <Rt>,<Rt2>,[<Rn>],#+/-<imm8>
     case ARM::t2STRD_POST:
-      BaseReg = MI.getOperand(2).getReg();
+      BaseReg = MI.getOperand(0).getReg();
       // Post-indexed store: just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
       break;
