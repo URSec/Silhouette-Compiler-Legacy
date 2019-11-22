@@ -112,28 +112,34 @@ doBitmasking(MachineInstr & MI, unsigned Reg, std::deque<MachineInstr *> & Insts
 }
 
 //
-// Function: handleSPUnalignedImmediate()
+// Function: handleSPUncommonImmediate()
 //
 // Description:
 //   This function takes care of cases where the base register of a store is SP
-//   and the immediate offset is not aligned by 4.
+//   and the immediate offset is either not aligned by 4 or too large.  It is
+//   caller's responsibility to update MI's base register to the return value
+//   and immediate to 0 after the function call.
 //
 // Inputs:
 //   MI          - A reference to the store instruction before and after which
 //                 to insert new instructions.
-//   SrcMO       - A reference to the source register operand of MI.
-//   BaseMO      - A reference to the base register operand of MI.
-//   ImmMO       - A reference to the immediate operand of MI.
+//   SrcReg      - The source register of MI.
+//   Imm         - The immediate of MI.
 //   InstsBefore - A reference to a deque that contains new instructions to
 //                 insert before MI.
 //   InstsAfter  - A reference to a deque that contains new instructions to
 //                 insert after MI.
+//   SrcReg2     - The second source register of MI in case MI is a double
+//                 word store.
 //
-static void
-handleSPUnalignedImmediate(MachineInstr & MI, MachineOperand & SrcMO,
-                           MachineOperand & BaseMO, MachineOperand & ImmMO,
-                           std::deque<MachineInstr *> & InstsBefore,
-                           std::deque<MachineInstr *> & InstsAfter) {
+// Return value:
+//   The new base register.
+//
+static unsigned
+handleSPUncommonImmediate(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
+                          std::deque<MachineInstr *> & InstsBefore,
+                          std::deque<MachineInstr *> & InstsAfter,
+                          unsigned SrcReg2 = ARM::NoRegister) {
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
@@ -142,8 +148,8 @@ handleSPUnalignedImmediate(MachineInstr & MI, MachineOperand & SrcMO,
 
   // Save a scratch register onto the stack.  Note that we are introducing a
   // new store here, so this store needs to be instrumented as well.
-  unsigned ScratchReg = SrcMO.getReg() == ARM::R0 ? ARM::R1 : ARM::R0;
-  int64_t Imm = ImmMO.getImm();
+  unsigned ScratchReg = ARM::R0;
+  while (ScratchReg == SrcReg || ScratchReg == SrcReg2) ScratchReg++;
   doBitmasking(MI, ARM::SP, InstsBefore);
   InstsBefore.push_back(BuildMI(MF, DL, TII->get(ARM::tPUSH))
                         .add(predOps(Pred, PredReg))
@@ -157,10 +163,6 @@ handleSPUnalignedImmediate(MachineInstr & MI, MachineOperand & SrcMO,
                         .addImm(Imm < 0 ? -Imm : Imm)
                         .add(predOps(Pred, PredReg)));
 
-  // Change the original store to use the new computed address
-  BaseMO.setReg(ScratchReg);
-  ImmMO.setImm(0);
-
   // Do bit-masking
   doBitmasking(MI, ScratchReg, InstsBefore);
 
@@ -168,6 +170,8 @@ handleSPUnalignedImmediate(MachineInstr & MI, MachineOperand & SrcMO,
   InstsAfter.push_back(BuildMI(MF, DL, TII->get(ARM::tPOP))
                        .add(predOps(Pred, PredReg))
                        .addReg(ScratchReg));
+
+  return ScratchReg;
 }
 
 //
@@ -301,48 +305,29 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     switch (MI.getOpcode()) {
     // A7.7.158 Encoding T1: STR<c> <Rt>,[<Rn>{,#<imm5>}]
     case ARM::tSTRi:
-    // A7.7.158 Encoding T2: STR<c> <Rt>,[SP,#<imm8>]
-    case ARM::tSTRspi:
-      BaseReg = MI.getOperand(1).getReg();
-      Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm:'00', 32) yet
-      // Add, bit-mask, store, and subtract
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
-        MI.getOperand(2).setImm(0);
-      }
-      doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
-      }
-      break;
-
     // A7.7.167 Encoding T1: STRH<c> <Rt>,[<Rn>{,#<imm5>}]
     case ARM::tSTRHi:
-      BaseReg = MI.getOperand(1).getReg();
-      Imm = MI.getOperand(2).getImm() << 1; // Not ZeroExtend(imm5:'0', 32) yet
-      // Add, bit-mask, store, and subtract
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
-        MI.getOperand(2).setImm(0);
-      }
-      doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
-      }
-      break;
-
     // A7.7.160 Encoding T1: STRB<c> <Rt>,[<Rn>{,#<imm5>}]
     case ARM::tSTRBi:
       BaseReg = MI.getOperand(1).getReg();
-      Imm = MI.getOperand(2).getImm();
-      // Add, bit-mask, store, and subtract
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
-        MI.getOperand(2).setImm(0);
-      }
+      // The immediate is small enough; just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
+      break;
+
+    // A7.7.158 Encoding T2: STR<c> <Rt>,[SP,#<imm8>]
+    case ARM::tSTRspi:
+      BaseReg = MI.getOperand(1).getReg();
+      Imm = MI.getOperand(2).getImm() << 2; // Not ZeroExtend(imm8:'00', 32) yet
+      if (Imm < 256) {
+        // For a small immediate, just bit-mask and store.
+        doBitmasking(MI, BaseReg, InstsBefore);
+      } else {
+        // For a large immediate, handle it separately.
+        BaseReg = handleSPUncommonImmediate(MI, MI.getOperand(0).getReg(), Imm,
+                                            InstsBefore, InstsAfter);
+        MI.setDesc(TII->get(ARM::t2STRi12));
+        MI.getOperand(1).setReg(BaseReg);
+        MI.getOperand(2).setImm(0);
       }
       break;
 
@@ -354,20 +339,22 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     case ARM::t2STRBi12:
       BaseReg = MI.getOperand(1).getReg();
       Imm = MI.getOperand(2).getImm();
-      // SP has to be 4 byte aligned; if the easy ways won't apply,
-      // special-case it
-      if (BaseReg == ARM::SP) {
-        handleSPUnalignedImmediate(MI, MI.getOperand(0), MI.getOperand(1),
-                                   MI.getOperand(2), InstsBefore, InstsAfter);
+      // For a small immediate, just bit-mask and store
+      if (Imm < 256) {
+        doBitmasking(MI, BaseReg, InstsBefore);
         break;
       }
-      // Add, bit-mask, store, and subtract
-      if (Imm != 0) {
+      if (BaseReg == ARM::SP) {
+        // Special-case SP as it should not be incremented
+        BaseReg = handleSPUncommonImmediate(MI, MI.getOperand(0).getReg(), Imm,
+                                            InstsBefore, InstsAfter);
+        MI.getOperand(1).setReg(BaseReg);
+        MI.getOperand(2).setImm(0);
+      } else {
+        // Add, bit-mask, store, and subtract
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(2).setImm(0);
-      }
-      doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0) {
+        doBitmasking(MI, BaseReg, InstsBefore);
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
@@ -379,26 +366,8 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     // A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#-<imm8>]
     case ARM::t2STRBi8:
       BaseReg = MI.getOperand(1).getReg();
-      Imm = MI.getOperand(2).getImm();
-      // SP has to be 4 byte aligned; if the easy ways won't apply,
-      // special-case it
-      if (BaseReg == ARM::SP) {
-        handleSPUnalignedImmediate(MI, MI.getOperand(0), MI.getOperand(1),
-                                   MI.getOperand(2), InstsBefore, InstsAfter);
-        // Clear the 'U' bit; otherwise it becomes an unprivileged store
-        MI.getOperand(2).setImm(-256 /* Actually 0 */);
-        break;
-      }
-      // Add, bit-mask, store, and subtract
-      if (Imm != -256) {
-        addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
-        // Clear the 'U' bit; otherwise it becomes an unprivileged store
-        MI.getOperand(2).setImm(-256 /* Actually 0 */);
-      }
+      // The immediate is small enough; just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != -256) {
-        subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
-      }
       break;
 
     // A7.7.158 Encoding T4: STR<c> <Rt>,[<Rn>,#+/-<imm8>]!
@@ -408,12 +377,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     // A7.7.160 Encoding T3: STRB<c> <Rt>,[<Rn>,#+/-<imm8>]!
     case ARM::t2STRB_PRE:
       BaseReg = MI.getOperand(0).getReg();
-      Imm = MI.getOperand(3).getImm();
-      // Pre-indexed stores: add, bit-mask, and store
-      if (Imm != 0 && BaseReg != ARM::SP) {
-        addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
-        MI.getOperand(3).setImm(0);
-      }
+      // Pre-indexed stores: just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
       break;
 
@@ -486,13 +450,23 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     case ARM::t2STRDi8:
       BaseReg = MI.getOperand(2).getReg();
       Imm = MI.getOperand(3).getImm(); // Already ZeroExtend(imm8:'00', 32)
-      // Add, bit-mask, store, and subtract
-      if (Imm != 0 && BaseReg != ARM::SP) {
+      // For a small immediate, just bit-mask and store
+      if (Imm >= -256 && Imm < 256) {
+        doBitmasking(MI, BaseReg, InstsBefore);
+        break;
+      }
+      if (BaseReg == ARM::SP) {
+        // Special-case SP as it should not be incremented
+        BaseReg = handleSPUncommonImmediate(MI, MI.getOperand(0).getReg(), Imm,
+                                            InstsBefore, InstsAfter,
+                                            MI.getOperand(1).getReg());
+        MI.getOperand(2).setReg(BaseReg);
+        MI.getOperand(3).setImm(0);
+      } else {
+        // Add, bit-mask, store, and subtract
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(3).setImm(0);
-      }
-      doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0 && BaseReg != ARM::SP) {
+        doBitmasking(MI, BaseReg, InstsBefore);
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
@@ -501,12 +475,24 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
     case ARM::t2STRD_PRE:
       BaseReg = MI.getOperand(0).getReg();
       Imm = MI.getOperand(4).getImm(); // Already ZeroExtend(imm8:'00', 32)
-      // Pre-indexed store: add, bit-mask, and store
-      if (Imm != 0 && BaseReg != ARM::SP) {
+      // For a small immediate, just bit-mask and store
+      if (Imm >= -256 && Imm < 256) {
+        doBitmasking(MI, BaseReg, InstsBefore);
+        break;
+      }
+      if (BaseReg == ARM::SP) {
+        // Special-case SP as it should not be incremented
+        BaseReg = handleSPUncommonImmediate(MI, MI.getOperand(1).getReg(), Imm,
+                                            InstsBefore, InstsAfter,
+                                            MI.getOperand(2).getReg());
+        MI.getOperand(0).setReg(BaseReg);
+        MI.getOperand(4).setImm(0);
+      } else {
+        // Pre-indexed store: add, bit-mask, and store
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(4).setImm(0);
+        doBitmasking(MI, BaseReg, InstsBefore);
       }
-      doBitmasking(MI, BaseReg, InstsBefore);
       break;
 
     // A7.7.163 Encoding T1: STRD<c> <Rt>,<Rt2>,[<Rn>],#+/-<imm8>
@@ -526,13 +512,22 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       if (ARM_AM::getAM5Op(MI.getOperand(2).getImm()) == ARM_AM::AddrOpc::sub) {
         Imm = -Imm;
       }
-      // Add, bit-mask, store, and subtract
-      if (Imm != 0 && BaseReg != ARM::SP) {
+      // For a small immediate, just bit-mask and store
+      if (Imm >= -256 && Imm < 256) {
+        doBitmasking(MI, BaseReg, InstsBefore);
+        break;
+      }
+      if (BaseReg == ARM::SP) {
+        // Special-case SP as it should not be incremented
+        BaseReg = handleSPUncommonImmediate(MI, ARM::NoRegister, Imm,
+                                            InstsBefore, InstsAfter);
+        MI.getOperand(1).setReg(BaseReg);
+        MI.getOperand(2).setImm(ARM_AM::getAM5Opc(ARM_AM::AddrOpc::add, 0));
+      } else {
+        // Add, bit-mask, store, and subtract
         addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
         MI.getOperand(2).setImm(ARM_AM::getAM5Opc(ARM_AM::AddrOpc::add, 0));
-      }
-      doBitmasking(MI, BaseReg, InstsBefore);
-      if (Imm != 0 && BaseReg != ARM::SP) {
+        doBitmasking(MI, BaseReg, InstsBefore);
         subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
       }
       break;
