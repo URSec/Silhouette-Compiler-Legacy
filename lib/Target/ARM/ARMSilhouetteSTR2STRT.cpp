@@ -163,13 +163,13 @@ restoreRegisters(MachineInstr & MI, unsigned Reg1, unsigned Reg2,
 //
 // Inputs:
 //   MI      - A reference to a store instruction before which to insert new
-//            instructions.
+//             instructions.
 //   SrcReg  - The source register of the store.
-//   SrcReg2 - The second register of the store in case this is a
-//             double world store.
 //   Imm     - The immediate offset of the store.
 //   strOpc  - The opcode of the new unprivileged store.
 //   Insts   - A reference to a deque that contains new instructions.
+//   SrcReg2 - The second register of the store in case this is a double word
+//             store.
 //
 static void
 handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
