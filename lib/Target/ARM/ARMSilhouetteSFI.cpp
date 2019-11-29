@@ -109,6 +109,11 @@ doBitmasking(MachineInstr & MI, unsigned Reg, std::deque<MachineInstr *> & Insts
                   .addImm(SFI_MASK)
                   .add(predOps(Pred, PredReg))
                   .add(condCodeOp()));
+  Insts.push_back(BuildMI(MF, DL, TII->get(ARM::t2BICri), Reg)
+                  .addReg(Reg)
+                  .addImm(SFI_MASK2)
+                  .add(predOps(Pred, PredReg))
+                  .add(condCodeOp()));
 }
 
 //
