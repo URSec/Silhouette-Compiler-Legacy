@@ -182,7 +182,7 @@ handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   // Save a scratch register onto the stack
-  unsigned ScratchReg = ARM::R0;
+  unsigned ScratchReg = ARM::R4;
   while (ScratchReg == SrcReg || ScratchReg == SrcReg2) ScratchReg++;
   backupRegisters(MI, ScratchReg, ARM::NoRegister, Insts);
   Imm += 4; // Compensate for SP decrement
