@@ -167,8 +167,8 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   // Build the following instruction sequence:
   //
   // bfc   reg, #0, #1          ; optional
-  // ldrh  scratch2, [reg, #0]
-  // cmp   scratch1, #CFI_LABEL
+  // ldrh  scratch, [reg, #0]
+  // cmp   scratch, #CFI_LABEL
   // it    ne
   // bfcne reg, #0, #32
   // orr   reg, reg, #1         ; optional
