@@ -153,17 +153,22 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   MachineBasicBlock & MBB = *MI.getParent();
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
-  unsigned ScratchReg = Reg == ARM::R5 ? ARM::R4 : ARM::R5;
-
-  // Backup a scratch register so that it is free to use
-  BackupRegister(MI, ScratchReg);
+  //
+  // Use IP (R12) as a scratch register if possible; otherwise spill and
+  // restore R4.
+  //
+  unsigned ScratchReg = ARM::R12;
+  if (ScratchReg == Reg) {
+    ScratchReg = ARM::R4;
+    BackupRegister(MI, ScratchReg);
+  }
 
   //
   // Build the following instruction sequence:
   //
   // bfc   reg, #0, #1          ; optional
-  // ldrh  scratch2, [reg, #0]
-  // cmp   scratch1, #CFI_LABEL
+  // ldrh  scratch, [reg, #0]
+  // cmp   scratch, #CFI_LABEL
   // it    ne
   // bfcne reg, #0, #32
   // orr   reg, reg, #1         ; optional
@@ -204,8 +209,10 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
     .add(condCodeOp());
   }
 
-  // Restore the scratch register
-  RestoreRegister(MI, ScratchReg);
+  // Restore the scratch register if we spilled it
+  if (ScratchReg != ARM::R12) {
+    RestoreRegister(MI, ScratchReg);
+  }
 }
 
 //

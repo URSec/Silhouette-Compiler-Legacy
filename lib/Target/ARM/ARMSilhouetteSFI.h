@@ -30,8 +30,9 @@ namespace llvm {
     FullSFI,
   };
 
-  // The SFI mask for t2BICri
-  static const uint32_t SFI_MASK = 0xc000c000u;
+  // The SFI masks for t2BICri
+  static const uint32_t SFI_MASK  = 0xc0000000u;
+  static const uint32_t SFI_MASK2 = 0x00800000u;
 
   struct ARMSilhouetteSFI
       : public MachineFunctionPass, ARMSilhouetteInstrumentor {

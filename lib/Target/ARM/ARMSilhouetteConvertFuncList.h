@@ -175,5 +175,10 @@ const static std::set<std::string> funcBlacklist {
     "HAL_TIMEx_CommutationCallback",
     "HAL_TIMEx_BreakCallback",
     "HAL_TIMEx_Break2Callback",
-    "main",
+
+    // Functions used by the F469 board
+    "BSP_SDRAM_Init",
+    "HAL_DMA_Init",
+    "SystemClock_Config",
+    "MPU_Init",
 };
