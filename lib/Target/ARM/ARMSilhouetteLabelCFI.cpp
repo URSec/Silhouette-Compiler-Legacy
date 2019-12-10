@@ -232,6 +232,11 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   if (funcBlacklist.find(MF.getName()) != funcBlacklist.end()) {
     return false;
   }
+  // Skip privileged functions in FreeRTOS
+  if (MF.getFunction().getSection().equals("privileged_functions")){
+    errs() << "Privileged function! skipped\n";
+    return false;
+  }
 #endif
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);

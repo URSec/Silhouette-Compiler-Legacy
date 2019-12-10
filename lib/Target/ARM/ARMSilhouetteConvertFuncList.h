@@ -175,4 +175,5 @@ const static std::set<std::string> funcBlacklist {
     "HAL_TIMEx_CommutationCallback",
     "HAL_TIMEx_BreakCallback",
     "HAL_TIMEx_Break2Callback",
+    "main",
 };
