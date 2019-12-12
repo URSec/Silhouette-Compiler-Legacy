@@ -396,6 +396,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
     unsigned ScratchReg, ScratchReg2;
     int64_t Imm, Imm2;
     std::deque<unsigned> RegList;
+    std::deque<unsigned> FreeRegs;
 
     std::deque<MachineInstr *> NewInsts;
     switch (MI.getOpcode()) {
@@ -959,19 +960,28 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       if (ARM_AM::getAM5Op(MI.getOperand(2).getImm()) == ARM_AM::AddrOpc::sub) {
         Imm = -Imm;
       }
-      // Saving 2 scratch registers onto the stack causes SP to decrement by
-      // 8.  If the base register is SP, we compensate it by increasing the
-      // immediate by the same amount.
-      if (BaseReg == ARM::SP) {
-        Imm += 8;
+      // First try to find 2 free registers; if we couldn't find enough
+      // registers, then resort to register spills
+      FreeRegs = findFreeRegisters(MI);
+      if (FreeRegs.size() >= 2) {
+        ScratchReg = FreeRegs[0];
+        ScratchReg2 = FreeRegs[1];
+      } else {
+        errs() << "[SP] Unable to find free registers for " << MI;
+        // Saving 2 scratch registers onto the stack causes SP to decrement by
+        // 8.  If the base register is SP, we compensate it by increasing the
+        // immediate by the same amount.
+        if (BaseReg == ARM::SP) {
+          Imm += 8;
+        }
+        // Pick 2 core registers as scratch registers, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
+        // Back up scratch registers onto the stack
+        backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
       }
       Imm2 = Imm;
-      // Pick 2 core registers as scratch registers, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
-      // Back up scratch registers onto the stack
-      backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
       // Move from the source register to 2 scratch registers
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::VMOVRRD))
                          .addReg(ScratchReg)
@@ -998,8 +1008,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
           subtractImmediateFromRegister(MI, BaseReg, Imm, NewInsts);
         }
       }
-      // Restore scratch registers from the stack
-      restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      if (FreeRegs.size() < 2) {
+        // Restore scratch registers from the stack
+        restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       break;
 
     // A7.7.256 Encoding T2: VSTR<c> <Sd>,[<Rn>{,#+/-<imm8>}]
@@ -1011,18 +1023,26 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       if (ARM_AM::getAM5Op(MI.getOperand(2).getImm()) == ARM_AM::AddrOpc::sub) {
         Imm = -Imm;
       }
-      // Saving a scratch register onto the stack causes SP to decrement by
-      // 4.  If the base register is SP, we compensate it by increasing the
-      // immediate by the same amount.
-      if (BaseReg == ARM::SP) {
-        Imm += 4;
+      // First try to find a free register; if we couldn't find one, then
+      // resort to register spill
+      FreeRegs = findFreeRegisters(MI);
+      if (!FreeRegs.empty()) {
+        ScratchReg = FreeRegs[0];
+      } else {
+        errs() << "[SP] Unable to find a free register for " << MI;
+        // Saving a scratch register onto the stack causes SP to decrement by
+        // 4.  If the base register is SP, we compensate it by increasing the
+        // immediate by the same amount.
+        if (BaseReg == ARM::SP) {
+          Imm += 4;
+        }
+        // Pick a core register as a scratch register, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        // Back up the scratch register onto the stack
+        backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
       }
       Imm2 = Imm;
-      // Pick a core register as a scratch register, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      // Back up the scratch register onto the stack
-      backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
       // Move from the source register to the scratch register
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::VMOVRS), ScratchReg)
                          .addReg(SrcReg)
@@ -1043,8 +1063,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
           subtractImmediateFromRegister(MI, BaseReg, Imm, NewInsts);
         }
       }
-      // Restore scratch registers from the stack
-      restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      if (FreeRegs.empty()) {
+        // Restore scratch registers from the stack
+        restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       break;
 
     //================================================================
@@ -1169,19 +1191,28 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
            ++i) {
         RegList.push_back(MI.getOperand(i).getReg());
       }
-      // Pick 2 core registers as scratch registers, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
-      // Back up scratch registers onto the stack
-      backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      // First try to find 2 free registers; if we couldn't find enough
+      // registers, then resort to register spills
+      FreeRegs = findFreeRegisters(MI);
+      if (FreeRegs.size() >= 2) {
+        ScratchReg = FreeRegs[0];
+        ScratchReg2 = FreeRegs[1];
+      } else {
+        errs() << "[SP] Unable to find free registers for " << MI;
+        // Pick 2 core registers as scratch registers, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
+        // Back up scratch registers onto the stack
+        backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       // Build 2 STRTs for each doubleword register in the list
       for (unsigned i = 0; i < RegList.size(); ++i) {
         Imm = i * 8;
         // Saving 2 scratch registers onto the stack causes SP to decrement by
         // 8.  If the base register is SP, we compensate it by increasing the
         // immediate by the same amount.
-        if (BaseReg == ARM::SP) {
+        if (BaseReg == ARM::SP && FreeRegs.size() < 2) {
           Imm += 8;
         }
         // Move from the source register to 2 scratch registers
@@ -1197,8 +1228,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                            .addReg(BaseReg)
                            .addImm(Imm + 4));
       }
-      // Restore scratch registers from the stack
-      restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      if (FreeRegs.size() < 2) {
+        // Restore scratch registers from the stack
+        restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       break;
 
     // A7.7.255 Encoding T1: VSTMDIA<c> <Rn>!,<list>
@@ -1210,19 +1243,28 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
            ++i) {
         RegList.push_back(MI.getOperand(i).getReg());
       }
-      // Pick 2 core registers as scratch registers, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
-      // Back up scratch registers onto the stack
-      backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      // First try to find 2 free registers; if we couldn't find enough
+      // registers, then resort to register spills
+      FreeRegs = findFreeRegisters(MI);
+      if (FreeRegs.size() >= 2) {
+        ScratchReg = FreeRegs[0];
+        ScratchReg2 = FreeRegs[1];
+      } else {
+        errs() << "[SP] Unable to find free registers for " << MI;
+        // Pick 2 core registers as scratch registers, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
+        // Back up scratch registers onto the stack
+        backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       // Build 2 STRTs for each doubleword register in the list
       for (unsigned i = 0; i < RegList.size(); ++i) {
         Imm = i * 8;
         // Saving 2 scratch registers onto the stack causes SP to decrement by
         // 8.  If the base register is SP, we compensate it by increasing the
         // immediate by the same amount.
-        if (BaseReg == ARM::SP) {
+        if (BaseReg == ARM::SP && FreeRegs.size() < 2) {
           Imm += 8;
         }
         // Move from the source register to 2 scratch registers
@@ -1238,8 +1280,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                            .addReg(BaseReg)
                            .addImm(Imm + 4));
       }
-      // Restore scratch registers from the stack
-      restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      if (FreeRegs.size() < 2) {
+        // Restore scratch registers from the stack
+        restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       // Increment the base register
       addImmediateToRegister(MI, BaseReg, RegList.size() * 8, NewInsts);
       break;
@@ -1255,19 +1299,28 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       }
       // Decrement the base register
       subtractImmediateFromRegister(MI, BaseReg, RegList.size() * 8, NewInsts);
-      // Pick 2 core registers as scratch registers, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
-      // Back up scratch registers onto the stack
-      backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      // First try to find 2 free registers; if we couldn't find enough
+      // registers, then resort to register spills
+      FreeRegs = findFreeRegisters(MI);
+      if (FreeRegs.size() >= 2) {
+        ScratchReg = FreeRegs[0];
+        ScratchReg2 = FreeRegs[1];
+      } else {
+        errs() << "[SP] Unable to find free registers for " << MI;
+        // Pick 2 core registers as scratch registers, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        ScratchReg2 = BaseReg == ARM::R2 ? ARM::R3 : ARM::R2;
+        // Back up scratch registers onto the stack
+        backupRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       // Build 2 STRTs for each doubleword register in the list
       for (unsigned i = 0; i < RegList.size(); ++i) {
         Imm = i * 8;
         // Saving 2 scratch registers onto the stack causes SP to decrement by
         // 8.  If the base register is SP, we compensate it by increasing the
         // immediate by the same amount.
-        if (BaseReg == ARM::SP) {
+        if (BaseReg == ARM::SP && FreeRegs.size() < 2) {
           Imm += 8;
         }
         // Move from the source register to 2 scratch registers
@@ -1283,8 +1336,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                            .addReg(BaseReg)
                            .addImm(Imm + 4));
       }
-      // Restore scratch registers from the stack
-      restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      if (FreeRegs.size() < 2) {
+        // Restore scratch registers from the stack
+        restoreRegisters(MI, ScratchReg, ScratchReg2, NewInsts);
+      }
       break;
 
     // A7.7.255 Encoding T2: VSTMSIA<c> <Rn>,<list>
@@ -1296,18 +1351,26 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
            ++i) {
         RegList.push_back(MI.getOperand(i).getReg());
       }
-      // Pick a core register as a scratch register, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      // Back up the scratch register onto the stack
-      backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      // First try to find a free register; if we couldn't find one, then
+      // resort to register spill
+      FreeRegs = findFreeRegisters(MI);
+      if (!FreeRegs.empty()) {
+        ScratchReg = FreeRegs[0];
+      } else {
+        errs() << "[SP] Unable to find a free register for " << MI;
+        // Pick a core register as a scratch register, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        // Back up the scratch register onto the stack
+        backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       // Build STRT for each singleword register in the list
       for (unsigned i = 0; i < RegList.size(); ++i) {
         Imm = i * 4;
         // Saving a scratch register onto the stack causes SP to decrement by
         // 4.  If the base register is SP, we compensate it by increasing the
         // immediate by the same amount.
-        if (BaseReg == ARM::SP) {
+        if (BaseReg == ARM::SP && FreeRegs.empty()) {
           Imm += 4;
         }
         // Move from the source register to the scratch register
@@ -1318,8 +1381,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                            .addReg(BaseReg)
                            .addImm(Imm));
       }
-      // Restore the scratch register from the stack
-      restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      if (FreeRegs.empty()) {
+        // Restore the scratch register from the stack
+        restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       break;
 
     // A7.7.255 Encoding T2: VSTMSIA<c> <Rn>!,<list>
@@ -1331,18 +1396,26 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
            ++i) {
         RegList.push_back(MI.getOperand(i).getReg());
       }
-      // Pick a core register as a scratch register, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      // Back up the scratch register onto the stack
-      backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      // First try to find a free register; if we couldn't find one, then
+      // resort to register spill
+      FreeRegs = findFreeRegisters(MI);
+      if (!FreeRegs.empty()) {
+        ScratchReg = FreeRegs[0];
+      } else {
+        errs() << "[SP] Unable to find a free register for " << MI;
+        // Pick a core register as a scratch register, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        // Back up the scratch register onto the stack
+        backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       // Build STRT for each singleword register in the list
       for (unsigned i = 0; i < RegList.size(); ++i) {
         Imm = i * 4;
         // Saving a scratch register onto the stack causes SP to decrement by
         // 4.  If the base register is SP, we compensate it by increasing the
         // immediate by the same amount.
-        if (BaseReg == ARM::SP) {
+        if (BaseReg == ARM::SP && FreeRegs.empty()) {
           Imm += 4;
         }
         // Move from the source register to the scratch register
@@ -1353,8 +1426,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                            .addReg(BaseReg)
                            .addImm(Imm));
       }
-      // Restore the scratch register from the stack
-      restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      if (FreeRegs.empty()) {
+        // Restore the scratch register from the stack
+        restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       // Increment the base register
       addImmediateToRegister(MI, BaseReg, RegList.size() * 4, NewInsts);
       break;
@@ -1370,18 +1445,26 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       }
       // Decrement the base register
       subtractImmediateFromRegister(MI, BaseReg, RegList.size() * 4, NewInsts);
-      // Pick a core register as a scratch register, because STRT can only
-      // encode core registers
-      ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
-      // Back up the scratch register onto the stack
-      backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      // First try to find a free register; if we couldn't find one, then
+      // resort to register spill
+      FreeRegs = findFreeRegisters(MI);
+      if (!FreeRegs.empty()) {
+        ScratchReg = FreeRegs[0];
+      } else {
+        errs() << "[SP] Unable to find a free register for " << MI;
+        // Pick a core register as a scratch register, because STRT can only
+        // encode core registers
+        ScratchReg = BaseReg == ARM::R0 ? ARM::R1 : ARM::R0;
+        // Back up the scratch register onto the stack
+        backupRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       // Build STRT for each singleword register in the list
       for (unsigned i = 0; i < RegList.size(); ++i) {
         Imm = i * 4;
         // Saving a scratch register onto the stack causes SP to decrement by
         // 4.  If the base register is SP, we compensate it by increasing the
         // immediate by the same amount.
-        if (BaseReg == ARM::SP) {
+        if (BaseReg == ARM::SP && FreeRegs.empty()) {
           Imm += 4;
         }
         // Move from the source register to the scratch register
@@ -1392,8 +1475,10 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
                            .addReg(BaseReg)
                            .addImm(Imm));
       }
-      // Restore the scratch register from the stack
-      restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      if (FreeRegs.empty()) {
+        // Restore the scratch register from the stack
+        restoreRegisters(MI, ScratchReg, ARM::NoRegister, NewInsts);
+      }
       break;
 
     default:
