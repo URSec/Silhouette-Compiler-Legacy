@@ -244,11 +244,11 @@ handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
 //   Insts     - A reference to a deque that contains new instructions.
 //
 static void
-handleSPWithOffsetReg(MachineInstr &MI, unsigned SrcReg, unsigned OffsetReg,
+handleSPWithOffsetReg(MachineInstr & MI, unsigned SrcReg, unsigned OffsetReg,
                       unsigned ShiftImm, unsigned strOpc,
-                      std::deque<MachineInstr *> &Insts) {
-  MachineFunction &MF = *MI.getMF();
-  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+                      std::deque<MachineInstr *> & Insts) {
+  MachineFunction & MF = *MI.getMF();
+  const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
   unsigned PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
@@ -259,17 +259,17 @@ handleSPWithOffsetReg(MachineInstr &MI, unsigned SrcReg, unsigned OffsetReg,
   // Add Offset register to the scratch register.
   if (ShiftImm > 0) {
     Insts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDrs), ScratchReg)
-                       .addReg(ScratchReg)
-                       .addReg(OffsetReg)
-                       .addImm(ShiftImm)
-                       .add(predOps(Pred, PredReg))
-                       .add(condCodeOp()));
+                    .addReg(ScratchReg)
+                    .addReg(OffsetReg)
+                    .addImm(ShiftImm)
+                    .add(predOps(Pred, PredReg))
+                    .add(condCodeOp()));
   } else {
     Insts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDrr), ScratchReg)
-                     .addReg(ScratchReg)
-                     .addReg(OffsetReg)
-                     .add(predOps(Pred, PredReg))
-                     .add(condCodeOp()));
+                    .addReg(ScratchReg)
+                    .addReg(OffsetReg)
+                    .add(predOps(Pred, PredReg))
+                    .add(condCodeOp()));
   }
 
   // Do the store
@@ -639,9 +639,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       Imm = MI.getOperand(3).getImm();
       // Pre-indexed: first ADD/SUB then STRT
       if (BaseReg == ARM::SP && Imm > 0) {
-        // When the base registet is sp, we need specially handle it,
+        // When the base register is SP, we need to specially handle it;
         // otherwise we might encounter an error if a hardware interrupt
-        // kicks in after the addImmediateToRegister operation.
+        // kicks in after the ADD/SUB operation.
         FreeRegs = findFreeRegisters(MI);
         handleSPWithUncommonImm(MI, SrcReg, Imm, ARM::t2STRT, NewInsts,
                                 FreeRegs);
