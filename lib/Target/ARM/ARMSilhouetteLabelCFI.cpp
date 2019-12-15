@@ -161,11 +161,15 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg,
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
   //
-  // Use IP (R12) as a scratch register if possible; otherwise spill and
+  // Try to find a free register first.  If we are unlucky, spill and (later)
   // restore R4.
   //
-  unsigned ScratchReg = ARM::R12;
-  if (ScratchReg == Reg) {
+  unsigned ScratchReg;
+  std::deque<unsigned> FreeRegs = findFreeRegisters(MI);
+  if (!FreeRegs.empty()) {
+    ScratchReg = FreeRegs[0];
+  } else {
+    errs() << "[CFI] Unable to find a free register for " << MI;
     ScratchReg = ARM::R4;
     BackupRegister(MI, ScratchReg);
   }
@@ -218,7 +222,7 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg,
   }
 
   // Restore the scratch register if we spilled it
-  if (ScratchReg != ARM::R12) {
+  if (FreeRegs.empty()) {
     RestoreRegister(MI, ScratchReg);
   }
 }
