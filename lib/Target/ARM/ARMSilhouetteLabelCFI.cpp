@@ -105,30 +105,35 @@ RestoreRegister(MachineInstr & MI, unsigned Reg) {
 }
 
 //
-// Method: insertCFILabel()
+// Method: insertCFILabelForCall()
 //
 // Description:
-//   This method inserts the CFI label before a machine function.
+//   This method inserts the CFI label for call before a machine function.
 //
 // Input:
 //   MF - A reference to the machine function.
 //
 void
-ARMSilhouetteLabelCFI::insertCFILabel(MachineFunction & MF) {
-  insertCFILabel(*MF.begin());
+ARMSilhouetteLabelCFI::insertCFILabelForCall(MachineFunction & MF) {
+  MachineBasicBlock & MBB = *MF.begin();
+  const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
+
+  // Use "movs r3, r3" as our CFI label
+  BuildMI(MBB, MBB.begin(), DL, TII->get(ARM::tMOVSr), ARM::R3)
+  .addReg(ARM::R3);
 }
 
 //
-// Method: insertCFILabel()
+// Method: insertCFILabelForJump()
 //
 // Description:
-//   This method inserts the CFI label before a machine basic block.
+//   This method inserts the CFI label for jump before a machine basic block.
 //
 // Input:
 //   MBB - A reference to a machine basic block.
 //
 void
-ARMSilhouetteLabelCFI::insertCFILabel(MachineBasicBlock & MBB) {
+ARMSilhouetteLabelCFI::insertCFILabelForJump(MachineBasicBlock & MBB) {
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
   // Use "mov r0, r0" as our CFI label
@@ -144,12 +149,14 @@ ARMSilhouetteLabelCFI::insertCFILabel(MachineBasicBlock & MBB) {
 //   control-flow transfer instruction that jumps to a target in a register.
 //
 // Inputs:
-//   MI  - A reference to the indirect forward control-flow transfer
-//         instruction.
-//   Reg - The register used by @MI.
+//   MI    - A reference to the indirect forward control-flow transfer
+//           instruction.
+//   Reg   - The register used by @MI.
+//   Label - The correct label to check.
 //
 void
-ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
+ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg,
+                                      uint16_t Label) {
   MachineBasicBlock & MBB = *MI.getParent();
   const TargetInstrInfo * TII = MBB.getParent()->getSubtarget().getInstrInfo();
 
@@ -189,9 +196,10 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   .addReg(Reg)
   .addImm(0);
   // Compare the target label with the correct label
+  assert(ARM_AM::getT2SOImmVal(Label) != -1 && "Invalid value for T2SOImm!");
   BuildMI(MBB, &MI, DL, TII->get(ARM::t2CMPri))
   .addReg(ScratchReg)
-  .addImm(CFI_LABEL);
+  .addImm(Label);
   // Clear all the bits of @Reg if two labels are not equal (a CFI violation)
   BuildMI(MBB, &MI, DL, TII->get(ARM::t2IT))
   .addImm(ARMCC::NE)
@@ -213,6 +221,40 @@ ARMSilhouetteLabelCFI::insertCFICheck(MachineInstr & MI, unsigned Reg) {
   if (ScratchReg != ARM::R12) {
     RestoreRegister(MI, ScratchReg);
   }
+}
+
+//
+// Method: insertCFICheckForCall()
+//
+// Description:
+//   This method inserts a CFI check before a specified indirect call
+//   instruction that calls a target function in a register.
+//
+// Inputs:
+//   MI    - A reference to the indirect call instruction.
+//   Reg   - The register used by @MI.
+//   Label - The correct label to check.
+//
+void
+ARMSilhouetteLabelCFI::insertCFICheckForCall(MachineInstr & MI, unsigned Reg) {
+  insertCFICheck(MI, Reg, CFI_LABEL_CALL);
+}
+
+//
+// Method: insertCFICheckForJump()
+//
+// Description:
+//   This method inserts a CFI check before a specified indirect jump
+//   instruction that jumps to a target in a register.
+//
+// Inputs:
+//   MI    - A reference to the indirect jump instruction.
+//   Reg   - The register used by @MI.
+//   Label - The correct label to check.
+//
+void
+ARMSilhouetteLabelCFI::insertCFICheckForJump(MachineInstr & MI, unsigned Reg) {
+  insertCFICheck(MI, Reg, CFI_LABEL_JMP);
 }
 
 //
@@ -310,7 +352,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   if ((!F.hasInternalLinkage() && !F.hasPrivateLinkage()) ||
       F.hasAddressTaken()) {
     if (MF.begin() != MF.end()) {
-      insertCFILabel(MF);
+      insertCFILabelForCall(MF);
     }
   }
 #else
@@ -330,19 +372,19 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
     case ARM::tBX:        // 0: GPR, 1: predCC, 2: predReg
     case ARM::tBXNS:      // 0: GPR, 1: predCC, 2: predReg
       for (MachineBasicBlock * SuccMBB : MI->getParent()->successors()) {
-        insertCFILabel(*SuccMBB);
+        insertCFILabelForJump(*SuccMBB);
       }
-      insertCFICheck(*MI, MI->getOperand(0).getReg());
+      insertCFICheckForJump(*MI, MI->getOperand(0).getReg());
       break;
 
     case ARM::tBLXr:      // 0: predCC, 1: predReg, 2: GPR
     case ARM::tBLXNSr:    // 0: predCC, 1: predReg, 2: GPRnopc
-      insertCFICheck(*MI, MI->getOperand(2).getReg());
+      insertCFICheckForCall(*MI, MI->getOperand(2).getReg());
       break;
 
     case ARM::tBX_CALL:   // 0: tGPR
     case ARM::tTAILJMPr:  // 0: tcGPR
-      insertCFICheck(*MI, MI->getOperand(0).getReg());
+      insertCFICheckForCall(*MI, MI->getOperand(0).getReg());
       break;
 
     default:
