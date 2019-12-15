@@ -195,6 +195,7 @@ handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
   }
 
   if (needSpill) {
+    errs() << "[SP] Unable to find a free register for SP in " << MI;
     // Find a register to spill
     ScratchReg = ARM::R4;
     while (ScratchReg == SrcReg || ScratchReg == SrcReg2) ScratchReg++;
