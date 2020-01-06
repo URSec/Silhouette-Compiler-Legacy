@@ -234,10 +234,10 @@ handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
 // Function: handleSPWithOffsetReg()
 //
 // Description:
-//   This function handles the case when base register of a Store Register
-//   is SP. In this case, we cannot put a pair of add/sub around the store
-//   because a hardware interrupt would corrupt the stack if it happens
-//   right after the add.
+//   This function handles the case where the base register of a Store Register
+//   instruction is SP.  In this case, we cannot put a pair of ADD/SUB around
+//   the store because a hardware interrupt would corrupt the stack if it
+//   happens right after the ADD.
 //
 // Inputs:
 //   MI        - A reference to a store instruction before which to insert new
@@ -247,19 +247,37 @@ handleSPWithUncommonImm(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
 //   ShiftImm  - The left shift immediate of the store.
 //   strOpc    - The opcode of the new unprivileged store.
 //   Insts     - A reference to a deque that contains new instructions.
+//   FreeRegs  - A reference to a deque that contains free registers before MI.
 //
 static void
 handleSPWithOffsetReg(MachineInstr & MI, unsigned SrcReg, unsigned OffsetReg,
                       unsigned ShiftImm, unsigned strOpc,
-                      std::deque<MachineInstr *> & Insts) {
+                      std::deque<MachineInstr *> & Insts,
+                      std::deque<unsigned> & FreeRegs) {
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
   unsigned PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
-  // Save a scratch register onto the stack.
-  unsigned ScratchReg = SrcReg == ARM::R0 ? ARM::R1 : ARM::R0;
+  // First try to find a free register
+  unsigned ScratchReg = ARM::NoRegister;
+  bool needSpill = true;
+  for (unsigned Reg : FreeRegs) {
+    if (Reg != SrcReg && Reg != OffsetReg) {
+      ScratchReg = Reg;
+      needSpill = false;
+      break;
+    }
+  }
+
+  if (needSpill) {
+    errs() << "[SP] Unable to find a free register for SP in " << MI;
+    // Save a scratch register onto the stack.
+    ScratchReg = ARM::R0;
+    while (ScratchReg == SrcReg || ScratchReg == OffsetReg) ScratchReg++;
+    backupRegisters(MI, ScratchReg, ARM::NoRegister, Insts);
+  }
 
   // Add SP and the offset register to the scratch register.
   if (ShiftImm > 0) {
@@ -277,14 +295,24 @@ handleSPWithOffsetReg(MachineInstr & MI, unsigned SrcReg, unsigned OffsetReg,
                     .add(condCodeOp()));
   }
 
+  // If we spiiled a register, we have to compensate the SP decrement by an ADD
+  if (needSpill) {
+    Insts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDri12), ScratchReg)
+                    .addReg(ScratchReg)
+                    .addImm(4)
+                    .add(predOps(Pred, PredReg)));
+  }
+
   // Do the store
   Insts.push_back(BuildMI(MF, DL, TII->get(strOpc))
                   .addReg(SrcReg)
                   .addReg(ScratchReg)
                   .addImm(0));
 
-  // Restore the scratch register from the stack
-  restoreRegisters(MI, ScratchReg, ARM::NoRegister, Insts);
+  // Restore the scratch register from the stack if we spilled it
+  if (needSpill) {
+    restoreRegisters(MI, ScratchReg, ARM::NoRegister, Insts);
+  }
 }
 
 //
@@ -769,7 +797,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       OffsetReg = MI.getOperand(2).getReg();
       // Add offset to base, do store, and subtract offset from base
       if (BaseReg == ARM::SP) {
-        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, 0, ARM::t2STRT, NewInsts);
+        FreeRegs = findFreeRegisters(MI);
+        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, 0, ARM::t2STRT,
+                              NewInsts, FreeRegs);
         break;
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDrr), BaseReg)
@@ -797,7 +827,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       // Add offset with LSL to base, do store, and subtract offset with LSL
       // from base
       if (BaseReg == ARM::SP) {
-        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, Imm, ARM::t2STRT, NewInsts);
+        FreeRegs = findFreeRegisters(MI);
+        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, Imm, ARM::t2STRT,
+                              NewInsts, FreeRegs);
         break;
       }
       NewInsts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDrs), BaseReg)
@@ -828,7 +860,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(1).getReg();
       OffsetReg = MI.getOperand(2).getReg();
       if (BaseReg == ARM::SP) {
-        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, 0, ARM::t2STRHT, NewInsts);
+        FreeRegs = findFreeRegisters(MI);
+        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, 0, ARM::t2STRHT,
+                              NewInsts, FreeRegs);
         break;
       }
       // Add offset to base, do store, and subtract offset from base
@@ -855,7 +889,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       OffsetReg = MI.getOperand(2).getReg();
       Imm = ARM_AM::getSORegOpc(ARM_AM::lsl, MI.getOperand(3).getImm());
       if (BaseReg == ARM::SP) {
-        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, Imm, ARM::t2STRHT, NewInsts);
+        FreeRegs = findFreeRegisters(MI);
+        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, Imm, ARM::t2STRHT,
+                              NewInsts, FreeRegs);
         break;
       }
       // Add offset with LSL to base, do store, and subtract offset with LSL
@@ -888,7 +924,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(1).getReg();
       OffsetReg = MI.getOperand(2).getReg();
       if (BaseReg == ARM::SP) {
-        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, 0, ARM::t2STRBT, NewInsts);
+        FreeRegs = findFreeRegisters(MI);
+        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, 0, ARM::t2STRBT,
+                              NewInsts, FreeRegs);
         break;
       }
       // Add offset to base, do store, and subtract offset from base
@@ -915,7 +953,9 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
       OffsetReg = MI.getOperand(2).getReg();
       Imm = ARM_AM::getSORegOpc(ARM_AM::lsl, MI.getOperand(3).getImm());
       if (BaseReg == ARM::SP) {
-        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, Imm, ARM::t2STRBT, NewInsts);
+        FreeRegs = findFreeRegisters(MI);
+        handleSPWithOffsetReg(MI, SrcReg, OffsetReg, Imm, ARM::t2STRBT,
+                              NewInsts, FreeRegs);
         break;
       }
       // Add offset with LSL to base, do store, and subtract offset with LSL
