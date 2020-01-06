@@ -27,7 +27,7 @@ namespace llvm {
 
     // The constant CFI label for indirect calls (encoding of "movs r3, r3")
     static const uint16_t CFI_LABEL_CALL = 0x001b;
-    // Rhe constant CFI label for indirect jumps (encoding of "mov r0, r0")
+    // The constant CFI label for indirect jumps (encoding of "mov r0, r0")
     static const uint16_t CFI_LABEL_JMP = 0x4600;
 
     ARMSilhouetteLabelCFI();
