@@ -136,7 +136,8 @@ ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
   }
 
   // Generate an STR to the shadow stack
-  NewMIs.push_back(BuildMI(MF, DL, TII->get(strOpc), ARM::LR)
+  NewMIs.push_back(BuildMI(MF, DL, TII->get(strOpc))
+                   .addReg(ARM::LR)
                    .addReg(SrcReg)
                    .addImm(offsetToGo)
                    .add(predOps(Pred, PredReg))

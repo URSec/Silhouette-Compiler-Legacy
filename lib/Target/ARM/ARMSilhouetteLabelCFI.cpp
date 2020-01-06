@@ -76,7 +76,8 @@ BackupRegister(MachineInstr & MI, unsigned Reg) {
     .addReg(ARM::SP)
     .addImm(1)
     .add(predOps(ARMCC::AL));
-    BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT), Reg)
+    BuildMI(MBB, &MI, DL, TII->get(ARM::t2STRT))
+    .addReg(Reg)
     .addReg(ARM::SP)
     .addImm(0);
   }
