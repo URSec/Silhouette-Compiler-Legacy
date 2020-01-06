@@ -261,17 +261,17 @@ handleSPWithOffsetReg(MachineInstr & MI, unsigned SrcReg, unsigned OffsetReg,
   // Save a scratch register onto the stack.
   unsigned ScratchReg = SrcReg == ARM::R0 ? ARM::R1 : ARM::R0;
 
-  // Add Offset register to the scratch register.
+  // Add SP and the offset register to the scratch register.
   if (ShiftImm > 0) {
     Insts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDrs), ScratchReg)
-                    .addReg(ScratchReg)
+                    .addReg(ARM::SP)
                     .addReg(OffsetReg)
                     .addImm(ShiftImm)
                     .add(predOps(Pred, PredReg))
                     .add(condCodeOp()));
   } else {
     Insts.push_back(BuildMI(MF, DL, TII->get(ARM::t2ADDrr), ScratchReg)
-                    .addReg(ScratchReg)
+                    .addReg(ARM::SP)
                     .addReg(OffsetReg)
                     .add(predOps(Pred, PredReg))
                     .add(condCodeOp()));
