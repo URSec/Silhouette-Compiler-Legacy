@@ -471,6 +471,10 @@ void ARMPassConfig::addIRPasses() {
   // Match interleaved memory accesses to ldN/stN intrinsics.
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createInterleavedAccessPass());
+
+  if (EnableSilhouetteCFI) {
+    addPass(createIndirectBrExpandPass());
+  }
 }
 
 void ARMPassConfig::addCodeGenPrepare() {

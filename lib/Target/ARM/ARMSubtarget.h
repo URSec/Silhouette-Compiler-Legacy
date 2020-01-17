@@ -803,6 +803,8 @@ public:
   // enableAtomicExpand- True if we need to expand our atomics.
   bool enableAtomicExpand() const override;
 
+  bool enableIndirectBrExpand() const override { return true; }
+
   /// getInstrItins - Return the instruction itineraries based on subtarget
   /// selection.
   const InstrItineraryData *getInstrItineraryData() const override {
