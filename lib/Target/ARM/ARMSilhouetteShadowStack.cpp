@@ -38,7 +38,7 @@ static DebugLoc DL;
 static cl::opt<int>
 ShadowStackOffset("arm-silhouette-shadowstack-offset",
                   cl::desc("Silhouette shadow stack offset"),
-                  cl::init(4092), cl::Hidden);
+                  cl::init(8388608), cl::Hidden);
 
 ARMSilhouetteShadowStack::ARMSilhouetteShadowStack()
     : MachineFunctionPass(ID) {
