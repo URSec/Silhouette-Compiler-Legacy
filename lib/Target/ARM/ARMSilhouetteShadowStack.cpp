@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
 
@@ -39,6 +40,11 @@ static cl::opt<int>
 ShadowStackOffset("arm-silhouette-shadowstack-offset",
                   cl::desc("Silhouette shadow stack offset"),
                   cl::init(8388608), cl::Hidden);
+
+static cl::opt<unsigned>
+GuardRegionSize("arm-silhouette-guard-region-size",
+                cl::desc("Silhouette guard region size"),
+                cl::init(1048576), cl::Hidden);
 
 ARMSilhouetteShadowStack::ARMSilhouetteShadowStack()
     : MachineFunctionPass(ID) {
@@ -293,10 +299,11 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
-#if 1
-  errs() << "[SS] Stack frame size: " << MF.getName() << ": "
-         << MF.getFrameInfo().getStackSize() << "\n";
-#endif
+  // Reject if the function stack frame is too large
+  if (MF.getFrameInfo().getStackSize() > GuardRegionSize) {
+    MF.getContext().reportError(SMLoc(),
+                                "Function stack frame exceeds the limit");
+  }
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
 
