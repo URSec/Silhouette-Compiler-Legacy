@@ -111,10 +111,9 @@ ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
 
   std::deque<MachineInstr *> NewMIs;
 
-  if (offset >= 0 && offset <= 4092) {
+  if (offset >= 0 && offset <= 4092 && !SilhouetteInvert) {
     // Single-instruction shortcut
-    NewMIs.push_back(BuildMI(MF, DL, TII->get(SilhouetteInvert ? ARM::t2STRT :
-                                                                 ARM::t2STRi12))
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRi12))
                      .addReg(ARM::LR)
                      .addReg(ARM::SP)
                      .addImm(offset)
