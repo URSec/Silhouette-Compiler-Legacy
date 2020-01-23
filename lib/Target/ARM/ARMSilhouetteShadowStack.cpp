@@ -99,49 +99,71 @@ ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
   int offset = ShadowStackOffset;
-  int offsetToGo = offset >= 0 ? offset : -offset;
-  unsigned addOpc = offset >= 0 ? ARM::t2ADDri12 : ARM::t2SUBri12;
-  unsigned strOpc = SilhouetteInvert ? ARM::t2STRT : ARM::t2STRi12;
 
   unsigned PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   std::deque<MachineInstr *> NewMIs;
 
-  // Adjust SrcReg properly so that [SrcReg + #offsetToGo] points to the
-  // correct shadow stack slot
-  unsigned SrcReg = ARM::SP;
-  unsigned DstReg = ARM::R12; // IP register, free to clobber between procedures
-  while (offsetToGo > 4092) {
-    NewMIs.push_back(BuildMI(MF, DL, TII->get(addOpc), DstReg)
-                     .addReg(SrcReg)
-                     .addImm(4092)
+  if (offset >= 0 && offset <= 4092) {
+    // Single-instruction shortcut
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(SilhouetteInvert ? ARM::t2STRT :
+                                                                 ARM::t2STRi12))
+                     .addReg(ARM::LR)
+                     .addReg(ARM::SP)
+                     .addImm(offset)
                      .add(predOps(Pred, PredReg))
                      .setMIFlag(MachineInstr::ShadowStack));
-    if (SrcReg == ARM::SP) {
-      SrcReg = DstReg;
+  } else {
+    // First encode the shadow stack offset into the scratch register
+    if (ARM_AM::getT2SOImmVal(offset) != -1) {
+      // Use one MOV if the offset can be expressed in Thumb modified constant
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2MOVi), ARM::R12)
+                       .addImm(offset)
+                       .add(predOps(Pred, PredReg))
+                       .add(condCodeOp()) // No 'S' bit
+                       .setMIFlag(MachineInstr::ShadowStack));
+    } else {
+      // Otherwise use MOV/MOVT to load lower/upper 16 bits of the offset
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2MOVi16), ARM::R12)
+                       .addImm(offset & 0xffff)
+                       .add(predOps(Pred, PredReg))
+                       .setMIFlag(MachineInstr::ShadowStack));
+      if ((offset >> 16) != 0) {
+        NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2MOVTi16), ARM::R12)
+                         .addReg(ARM::R12)
+                         .addImm(offset >> 16)
+                         .add(predOps(Pred, PredReg))
+                         .setMIFlag(MachineInstr::ShadowStack));
+      }
     }
-    offsetToGo -= 4092;
-  }
-  if (offset < 0 || (SilhouetteInvert && offsetToGo > 255)) {
-    NewMIs.push_back(BuildMI(MF, DL, TII->get(addOpc), DstReg)
-                     .addReg(SrcReg)
-                     .addImm(offsetToGo)
-                     .add(predOps(Pred, PredReg))
-                     .setMIFlag(MachineInstr::ShadowStack));
-    if (SrcReg == ARM::SP) {
-      SrcReg = DstReg;
-    }
-    offsetToGo = 0;
-  }
 
-  // Generate an STR to the shadow stack
-  NewMIs.push_back(BuildMI(MF, DL, TII->get(strOpc))
-                   .addReg(ARM::LR)
-                   .addReg(SrcReg)
-                   .addImm(offsetToGo)
-                   .add(predOps(Pred, PredReg))
-                   .setMIFlag(MachineInstr::ShadowStack));
+    // Store the return address onto the shadow stack
+    if (SilhouetteInvert) {
+      // Add SP with the offset to the scratch register
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::tADDrSP), ARM::R12)
+                       .addReg(ARM::SP)
+                       .addReg(ARM::R12)
+                       .add(predOps(Pred, PredReg))
+                       .setMIFlag(MachineInstr::ShadowStack));
+      // Generate an STRT to the shadow stack
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRT))
+                       .addReg(ARM::LR)
+                       .addReg(ARM::R12)
+                       .addImm(0)
+                       .add(predOps(Pred, PredReg))
+                       .setMIFlag(MachineInstr::ShadowStack));
+    } else {
+      // Generate an STR to the shadow stack
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2STRs))
+                       .addReg(ARM::LR)
+                       .addReg(ARM::SP)
+                       .addReg(ARM::R12)
+                       .addImm(0)
+                       .add(predOps(Pred, PredReg))
+                       .setMIFlag(MachineInstr::ShadowStack));
+    }
+  }
 
   // Now insert these new instructions into the basic block
   insertInstsBefore(MI, NewMIs);
@@ -166,8 +188,6 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
   int offset = ShadowStackOffset;
-  int offsetToGo = offset >= 0 ? offset : -offset;
-  unsigned addOpc = offset >= 0 ? ARM::t2ADDri12 : ARM::t2SUBri12;
 
   unsigned PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
@@ -181,39 +201,45 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
                    .add(predOps(Pred, PredReg))
                    .setMIFlag(MachineInstr::ShadowStack));
 
-  // Adjust SrcReg properly so that [SrcReg + #offsetToGo] points to the
-  // correct shadow stack slot
-  unsigned SrcReg = ARM::SP;
-  unsigned DstReg = ARM::R12; // IP register, free to clobber between procedures
-  while (offsetToGo > 4092) {
-    NewMIs.push_back(BuildMI(MF, DL, TII->get(addOpc), DstReg)
-                     .addReg(SrcReg)
-                     .addImm(4092)
+  if (offset >= 0 && offset <= 4092) {
+    // Single-instruction shortcut
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRi12), PCLR.getReg())
+                     .addReg(ARM::SP)
+                     .addImm(offset)
                      .add(predOps(Pred, PredReg))
                      .setMIFlag(MachineInstr::ShadowStack));
-    if (SrcReg == ARM::SP) {
-      SrcReg = DstReg;
+  } else {
+    // First encode the shadow stack offset into the scratch register
+    if (ARM_AM::getT2SOImmVal(offset) != -1) {
+      // Use one MOV if the offset can be expressed in Thumb modified constant
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2MOVi), ARM::R12)
+                       .addImm(offset)
+                       .add(predOps(Pred, PredReg))
+                       .add(condCodeOp()) // No 'S' bit
+                       .setMIFlag(MachineInstr::ShadowStack));
+    } else {
+      // Otherwise use MOV/MOVT to load lower/upper 16 bits of the offset
+      NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2MOVi16), ARM::R12)
+                       .addImm(offset & 0xffff)
+                       .add(predOps(Pred, PredReg))
+                       .setMIFlag(MachineInstr::ShadowStack));
+      if ((offset >> 16) != 0) {
+        NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2MOVTi16), ARM::R12)
+                         .addReg(ARM::R12)
+                         .addImm(offset >> 16)
+                         .add(predOps(Pred, PredReg))
+                         .setMIFlag(MachineInstr::ShadowStack));
+      }
     }
-    offsetToGo -= 4092;
-  }
-  if (offset < 0) {
-    NewMIs.push_back(BuildMI(MF, DL, TII->get(addOpc), DstReg)
-                     .addReg(SrcReg)
-                     .addImm(offsetToGo)
-                     .add(predOps(Pred, PredReg))
-                     .setMIFlag(MachineInstr::ShadowStack));
-    if (SrcReg == ARM::SP) {
-      SrcReg = DstReg;
-    }
-    offsetToGo = 0;
-  }
 
-  // Generate an LDR from the shadow stack to PC/LR
-  NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRi12), PCLR.getReg())
-                   .addReg(SrcReg)
-                   .addImm(offsetToGo)
-                   .add(predOps(Pred, PredReg))
-                   .setMIFlag(MachineInstr::ShadowStack));
+    // Generate an LDR from the shadow stack to PC/LR
+    NewMIs.push_back(BuildMI(MF, DL, TII->get(ARM::t2LDRs), PCLR.getReg())
+                     .addReg(ARM::SP)
+                     .addReg(ARM::R12)
+                     .addImm(0)
+                     .add(predOps(Pred, PredReg))
+                     .setMIFlag(MachineInstr::ShadowStack));
+  }
 
   // Now insert these new instructions into the basic block
   insertInstsAfter(MI, NewMIs);
