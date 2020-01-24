@@ -303,6 +303,10 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
     MF.getContext().reportError(SMLoc(),
                                 "Function stack frame exceeds the limit");
   }
+  // Reject if the function has variable-size objects
+  if (MF.getFrameInfo().hasVarSizedObjects()) {
+    MF.getContext().reportError(SMLoc(), "Variable-size objects not allowed");
+  }
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
 
