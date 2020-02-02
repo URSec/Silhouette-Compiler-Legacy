@@ -22,7 +22,6 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
 
@@ -293,9 +292,9 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
-  // Reject if the function has variable-size objects
+  // Reject if the function has variable-sized objects
   if (MF.getFrameInfo().hasVarSizedObjects()) {
-    MF.getContext().reportError(SMLoc(), "Variable-size objects not allowed");
+    MF.getFunction().getContext().emitError("Variable-sized objects not allowed");
   }
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
