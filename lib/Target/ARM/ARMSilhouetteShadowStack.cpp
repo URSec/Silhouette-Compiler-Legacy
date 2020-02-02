@@ -39,12 +39,7 @@ static DebugLoc DL;
 static cl::opt<int>
 ShadowStackOffset("arm-silhouette-shadowstack-offset",
                   cl::desc("Silhouette shadow stack offset"),
-                  cl::init(8388608), cl::Hidden);
-
-static cl::opt<unsigned>
-GuardRegionSize("arm-silhouette-guard-region-size",
-                cl::desc("Silhouette guard region size"),
-                cl::init(1048576), cl::Hidden);
+                  cl::init(14680064), cl::Hidden);
 
 ARMSilhouetteShadowStack::ARMSilhouetteShadowStack()
     : MachineFunctionPass(ID) {
@@ -298,11 +293,6 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
-  // Reject if the function stack frame is too large
-  if (MF.getFrameInfo().getStackSize() > GuardRegionSize) {
-    MF.getContext().reportError(SMLoc(),
-                                "Function stack frame exceeds the limit");
-  }
   // Reject if the function has variable-size objects
   if (MF.getFrameInfo().hasVarSizedObjects()) {
     MF.getContext().reportError(SMLoc(), "Variable-size objects not allowed");
