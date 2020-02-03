@@ -91,14 +91,19 @@ findTailJmp(MachineInstr & MI) {
 //   shadow stack.
 //
 // Input:
-//   MI - A reference to a PUSH instruction before which to insert instructions.
+//   MI - A reference to a PUSH instruction after which to insert instructions.
 //
 void
 ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  int offset = ShadowStackOffset;
+  // Find the number of registers MI pushes
+  int NumRegs = (int)MI.getNumExplicitOperands() - MI.findFirstPredOperandIdx() - 2;
+  assert(NumRegs > 0 && NumRegs < (int)MI.getNumExplicitOperands() - 1);
+
+  // Compensate the shadow stack offset by the number of bytes MI writes
+  int offset = ShadowStackOffset + NumRegs * 4;
 
   unsigned PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
@@ -165,7 +170,7 @@ ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
   }
 
   // Now insert these new instructions into the basic block
-  insertInstsBefore(MI, NewMIs);
+  insertInstsAfter(MI, NewMIs);
 }
 
 //
