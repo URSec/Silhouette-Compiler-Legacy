@@ -292,9 +292,12 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
-  // Reject if the function has variable-sized objects
+  // Warn if the function has variable-sized objects; we assume the program is
+  // transformed by store-to-heap promotion, either via a compiler pass or
+  // manually
   if (MF.getFrameInfo().hasVarSizedObjects()) {
-    MF.getFunction().getContext().emitError("Variable-sized objects not allowed");
+    errs() << "[SS] Variable-sized objects not promoted in "
+           << MF.getName() << "\n";
   }
 
   unsigned long OldCodeSize = getFunctionCodeSize(MF);
