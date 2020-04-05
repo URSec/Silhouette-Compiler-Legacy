@@ -14,7 +14,6 @@
 //
 
 #include "ARM.h"
-#include "ARMSilhouetteConvertFuncList.h"
 #include "ARMSilhouetteSFI.h"
 #include "ARMTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -201,8 +200,9 @@ handleSPUncommonImmediate(MachineInstr & MI, unsigned SrcReg, int64_t Imm,
 bool
 ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
 #if 1
-  // Skip certain functions
-  if (funcBlacklist.find(MF.getName()) != funcBlacklist.end()) {
+  // Skip privileged functions
+  if (MF.getFunction().getSection().equals("privileged_functions")) {
+    errs() << "Privileged function! skipped\n";
     return false;
   }
 #endif

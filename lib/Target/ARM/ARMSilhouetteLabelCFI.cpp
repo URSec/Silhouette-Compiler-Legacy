@@ -14,7 +14,6 @@
 //
 
 #include "ARM.h"
-#include "ARMSilhouetteConvertFuncList.h"
 #include "ARMSilhouetteLabelCFI.h"
 #include "ARMTargetMachine.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -282,12 +281,8 @@ ARMSilhouetteLabelCFI::insertCFICheckForJump(MachineInstr & MI, unsigned Reg) {
 bool
 ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
 #if 1
-  // Skip certain functions
-  if (funcBlacklist.find(MF.getName()) != funcBlacklist.end()) {
-    return false;
-  }
-  // Skip privileged functions in FreeRTOS
-  if (MF.getFunction().getSection().equals("privileged_functions")){
+  // Skip privileged functions
+  if (MF.getFunction().getSection().equals("privileged_functions")) {
     errs() << "Privileged function! skipped\n";
     return false;
   }

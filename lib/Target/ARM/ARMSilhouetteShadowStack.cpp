@@ -15,7 +15,6 @@
 
 #include "ARM.h"
 #include "ARMBaseInstrInfo.h"
-#include "ARMSilhouetteConvertFuncList.h"
 #include "ARMSilhouetteShadowStack.h"
 #include "ARMTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -281,12 +280,8 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
 bool
 ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
 #if 1
-  // Skip certain functions
-  if (funcBlacklist.find(MF.getName()) != funcBlacklist.end()) {
-    return false;
-  }
-  // Skip privileged functions in FreeRTOS
-  if (MF.getFunction().getSection().equals("privileged_functions")){
+  // Skip privileged functions
+  if (MF.getFunction().getSection().equals("privileged_functions")) {
     errs() << "Privileged function! skipped\n";
     return false;
   }
