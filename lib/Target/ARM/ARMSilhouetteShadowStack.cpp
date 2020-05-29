@@ -295,8 +295,6 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
            << MF.getName() << "\n";
   }
 
-  unsigned long OldCodeSize = getFunctionCodeSize(MF);
-
   for (MachineBasicBlock & MBB : MF) {
     for (MachineInstr & MI : MBB) {
       switch (MI.getOpcode()) {
@@ -349,14 +347,6 @@ ARMSilhouetteShadowStack::runOnMachineFunction(MachineFunction & MF) {
       }
     }
   }
-
-  unsigned long NewCodeSize = getFunctionCodeSize(MF);
-
-  // Output code size information
-  std::error_code EC;
-  raw_fd_ostream MemStat("./code_size_ss.stat", EC,
-                         sys::fs::OpenFlags::F_Append);
-  MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
 
   return true;
 }

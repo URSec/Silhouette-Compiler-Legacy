@@ -288,8 +288,6 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
   }
 #endif
 
-  unsigned long OldCodeSize = getFunctionCodeSize(MF);
-
   //
   // Iterate through all the instructions within the function to locate
   // indirect branches and calls.
@@ -390,21 +388,6 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
     default:
       llvm_unreachable("Unexpected opcode");
     }
-  }
-
-  unsigned long NewCodeSize = getFunctionCodeSize(MF);
-
-  // Output code size information
-  std::error_code EC;
-  raw_fd_ostream MemStat("./code_size_cfi.stat", EC,
-                         sys::fs::OpenFlags::F_Append);
-  MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
-
-  // Output jump table jump information
-  raw_fd_ostream JTJStat("./jump_table_jump.stat", EC,
-                         sys::fs::OpenFlags::F_Append);
-  for (MachineInstr * MI : JTJs) {
-    JTJStat << MI->getMF()->getName() << "\n";
   }
 
   return true;

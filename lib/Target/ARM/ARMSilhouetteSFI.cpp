@@ -209,8 +209,6 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
 
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned long OldCodeSize = getFunctionCodeSize(MF);
-
   // Iterate over all machine instructions to find stores
   std::deque<MachineInstr *> Stores;
   for (MachineBasicBlock & MBB : MF) {
@@ -582,14 +580,6 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       insertInstsAfter(MI, InstsAfter);
     }
   }
-
-  unsigned long NewCodeSize = getFunctionCodeSize(MF);
-
-  // Output code size information
-  std::error_code EC;
-  raw_fd_ostream MemStat("./code_size_sfi.stat", EC,
-                         sys::fs::OpenFlags::F_Append);
-  MemStat << MF.getName() << ":" << OldCodeSize << ":" << NewCodeSize << "\n";
 
   return true;
 }
