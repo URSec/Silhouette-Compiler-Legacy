@@ -337,7 +337,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
 #if 1
   // Skip privileged functions
   if (MF.getFunction().getSection().equals("privileged_functions")) {
-    errs() << "Privileged function! skipped\n";
+    errs() << "[SP] Privileged function! skipped: " << MF.getName() << "\n";
     return false;
   }
 #endif

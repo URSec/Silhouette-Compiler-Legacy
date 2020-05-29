@@ -283,7 +283,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
 #if 1
   // Skip privileged functions
   if (MF.getFunction().getSection().equals("privileged_functions")) {
-    errs() << "Privileged function! skipped\n";
+    errs() << "[CFI] Privileged function! skipped: " << MF.getName() << "\n";
     return false;
   }
 #endif
@@ -336,7 +336,7 @@ ARMSilhouetteLabelCFI::runOnMachineFunction(MachineFunction & MF) {
 
       default:
         if (MI.isIndirectBranch() || MI.isCall()) {
-          errs() << "[CFI]: unidentified branch/call: " << MI;
+          errs() << "[CFI] Unidentified branch/call: " << MI;
         }
         break;
       }
