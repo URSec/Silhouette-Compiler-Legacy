@@ -118,9 +118,9 @@ ARMSilhouetteLabelCFI::insertCFILabelForCall(MachineFunction & MF) {
   MachineBasicBlock & MBB = *MF.begin();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  // Use "movs r3, r3" as our CFI label
-  BuildMI(MBB, MBB.begin(), DL, TII->get(ARM::tMOVSr), ARM::R3)
-  .addReg(ARM::R3);
+  // Use "mov r0, r0" as our CFI label
+  BuildMI(MBB, MBB.begin(), DL, TII->get(ARM::tMOVr), ARM::R0)
+  .addReg(ARM::R0);
 }
 
 //
