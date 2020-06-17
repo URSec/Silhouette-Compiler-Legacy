@@ -282,7 +282,14 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
           Stores.push_back(&MI);
         }
         break;
-
+    
+      // Store Exclusive
+      // ARMv7-M does not support STREXD, so it is not handled
+      case ARM::t2STREX:
+      case ARM::t2STREXB:
+      case ARM::t2STREXH:
+        // Store exclusives, always use SFI
+        Stores.push_back(&MI);
       case ARM::INLINEASM:
         break;
 
@@ -567,6 +574,32 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       BaseReg = MI.getOperand(0).getReg();
       // Store multiple: just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
+      break;
+    
+    // A7.7.165 Encoding T1: STREXB<c> <Rd>,<Rt>,[<Rn>]
+    case ARM::t2STREXB:
+    // A7.7.166 Encoding T1: STREXH<c> <Rd>,<Rt>,[<Rn>]
+    case ARM::t2STREXH:
+      BaseReg = MI.getOperand(2).getReg();
+      // Store exclusives with no immediate; just bit-mask and store
+      doBitmasking(MI, BaseReg, InstsBefore);
+      break;
+    
+    // A7.7.164 Encoding T1: STREX<c> <Rd>,<Rt>,[<Rn>{,#<imm8>}]
+    case ARM::t2STREX:
+      BaseReg = MI.getOperand(2).getReg();
+      Imm = MI.getOperand(3).getImm() << 2; // Not ZeroExtend(imm8:'00', 32) yet
+      if (Imm < 256) {
+        // For a small immediate, just bit-mask and store.
+        doBitmasking(MI, BaseReg, InstsBefore);
+      } else {
+        // For a large immediate, handle it separately.
+        // Add, bit-mask, store, and subtract
+        addImmediateToRegister(MI, BaseReg, Imm, InstsBefore);
+        MI.getOperand(3).setImm(0);
+        doBitmasking(MI, BaseReg, InstsBefore);
+        subtractImmediateFromRegister(MI, BaseReg, Imm, InstsAfter);
+      }
       break;
 
     default:
