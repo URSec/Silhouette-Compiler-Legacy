@@ -420,6 +420,13 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
         }
         break;
 
+      // Store Exclusive
+      // Handled by the SFI pass
+      case ARM::t2STREX:
+      case ARM::t2STREXB:
+      case ARM::t2STREXH:
+        break;
+
       case ARM::INLINEASM:
         break;
 
