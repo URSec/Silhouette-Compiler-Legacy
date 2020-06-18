@@ -282,7 +282,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
           Stores.push_back(&MI);
         }
         break;
-    
+
       // Store Exclusive
       // ARMv7-M does not support STREXD, so it is not handled
       case ARM::t2STREX:
@@ -290,6 +290,8 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       case ARM::t2STREXH:
         // Store exclusives, always use SFI
         Stores.push_back(&MI);
+        break;
+
       case ARM::INLINEASM:
         break;
 
@@ -575,7 +577,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       // Store multiple: just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
       break;
-    
+
     // A7.7.165 Encoding T1: STREXB<c> <Rd>,<Rt>,[<Rn>]
     case ARM::t2STREXB:
     // A7.7.166 Encoding T1: STREXH<c> <Rd>,<Rt>,[<Rn>]
@@ -584,7 +586,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       // Store exclusives with no immediate; just bit-mask and store
       doBitmasking(MI, BaseReg, InstsBefore);
       break;
-    
+
     // A7.7.164 Encoding T1: STREX<c> <Rd>,<Rt>,[<Rn>{,#<imm8>}]
     case ARM::t2STREX:
       BaseReg = MI.getOperand(2).getReg();
