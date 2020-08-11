@@ -1,11 +1,13 @@
 //===-- ARMTargetMachine.cpp - Define TargetMachine for ARM ---------------===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+// Part of the LLVM and Silhouette Projects, under the Apache License v2.0
+// with LLVM Exceptions.
+// See LICENSE.txt in the top-level directory for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
+// Modified at the University of Rochester for the Silhouette Project.
 //
 //===----------------------------------------------------------------------===//
 

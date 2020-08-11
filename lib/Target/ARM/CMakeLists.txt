@@ -1,3 +1,6 @@
+#
+# Modified at the University of Rochester for the Silhouette Project.
+#
 set(LLVM_TARGET_DEFINITIONS ARM.td)
 
 tablegen(LLVM ARMGenAsmMatcher.inc -gen-asm-matcher)

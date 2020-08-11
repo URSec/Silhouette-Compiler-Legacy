@@ -1,9 +1,13 @@
 //===-- ARMSilhouetteSTR2STRT - Store to Unprivileged Store convertion-----===//
 //
 //         Protecting Control Flow of Real-time OS applications
+//              Copyright (c) 2019-2020, University of Rochester
 //
-// This file was written by at the University of Rochester.
-// All Rights Reserved.
+// Part of the Silhouette Project, under the Apache License v2.0 with
+// LLVM Exceptions.
+// See LICENSE.txt in the top-level directory for license information.
+//
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //

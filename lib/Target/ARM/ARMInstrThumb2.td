@@ -1,7 +1,8 @@
 //===-- ARMInstrThumb2.td - Thumb2 support for ARM ---------*- tablegen -*-===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+// Part of the Silhouette and LLVM Projects, under the Apache License v2.0
+// with LLVM Exceptions.
+// See LICENSE.txt in the top-level directory for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
@@ -9,6 +10,11 @@
 // This file describes the Thumb2 instruction set.
 //
 //===----------------------------------------------------------------------===//
+//
+// Modified at the University of Rochester for the Silhouette Project.
+//
+//===----------------------------------------------------------------------===//
+
 
 // IT block predicate field
 def it_pred_asmoperand : AsmOperandClass {

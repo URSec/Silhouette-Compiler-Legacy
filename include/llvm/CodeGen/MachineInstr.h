@@ -1,7 +1,10 @@
 //===- llvm/CodeGen/MachineInstr.h - MachineInstr class ---------*- C++ -*-===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+//              Copyright (c) 2019-2020, University of Rochester
+//
+// Part of the LLVM and Silhouette Projects, under the Apache License v2.0
+// with LLVM Exceptions.
+// See LICENSE.txt in the top-level directory for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
